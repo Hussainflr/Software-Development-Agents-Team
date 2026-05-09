@@ -54,6 +54,6 @@ class LiteLLMClient:
             raise ProviderConnectionError(
                 "Ollama is not reachable at "
                 f"{base_url}. Start it with `ollama serve` and pull a model with "
-                "`ollama pull qwen2.5-coder` or `ollama pull llama3.1`."
+                "`ollama pull qwen3:4b` or `ollama pull llama3.1`."
             ) from exc
 

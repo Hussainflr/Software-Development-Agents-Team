@@ -16,7 +16,7 @@ class Run(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     requirement: Mapped[str] = mapped_column(Text)
     provider: Mapped[str] = mapped_column(String(40), default="ollama")
-    model: Mapped[str] = mapped_column(String(120), default="qwen2.5-coder")
+    model: Mapped[str] = mapped_column(String(120), default="qwen3:4b")
     status: Mapped[str] = mapped_column(String(40), default="created")
     current_stage: Mapped[str] = mapped_column(String(80), default="requirement")
     approved_for_deployment: Mapped[bool] = mapped_column(Boolean, default=False)

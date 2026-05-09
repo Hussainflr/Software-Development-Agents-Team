@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class RunCreate(BaseModel):
     requirement: str = Field(min_length=5)
     provider: str = "ollama"
-    model: str = "qwen2.5-coder"
+    model: str = "qwen3:4b"
 
 
 class RunResponse(BaseModel):

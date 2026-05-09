@@ -1,6 +1,6 @@
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 import streamlit as st
@@ -81,8 +81,8 @@ def get_providers() -> dict:
     if not data:
         return {
             "default_provider": "ollama",
-            "default_model": "qwen2.5-coder",
-            "options": [{"id": "ollama", "label": "Ollama", "default_model": "qwen2.5-coder"}],
+            "default_model": "qwen3:4b",
+            "options": [{"id": "ollama", "label": "Ollama", "default_model": "qwen3:4b"}],
         }
     return data
 
@@ -148,12 +148,43 @@ def render_logs(logs: list[dict]) -> None:
         }
         for row in reversed(logs[-80:])
     ]
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.dataframe(rows, width="stretch", hide_index=True)
+
+
+def render_agent_action_feed(logs: list[dict]) -> None:
+    if not logs:
+        st.info("Waiting for agents to begin work.")
+        return
+
+    latest = list(reversed(logs[-8:]))
+    for entry in latest:
+        timestamp = format_time(entry.get("timestamp", ""))
+        label = f"{timestamp} — {entry.get('agent_name', 'Unknown Agent')} ({entry.get('status', 'unknown')})"
+        with st.expander(label, expanded=False):
+            st.markdown(f"**Action:** {entry.get('action', 'No action recorded')}")
+            if entry.get("output_summary"):
+                st.markdown(f"**Summary:** {entry['output_summary']}")
+
+
+def compute_progress(detail: dict, statuses: dict[str, str]) -> int:
+    if detail.get("status") in {"success", "completed"}:
+        return 100
+
+    completed_stages = 1
+    completed_stages += 1 if statuses.get("Backend Agent") == "completed" else 0
+    completed_stages += 1 if statuses.get("Frontend Agent") == "completed" else 0
+    completed_stages += 1 if statuses.get("Tester Agent") == "completed" else 0
+    completed_stages += 1 if statuses.get("Deployment Agent") == "completed" else 0
+    return int(100 * completed_stages / len(STAGES))
 
 
 def format_time(value: str) -> str:
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%H:%M:%S")
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        local_dt = parsed.astimezone()
+        return local_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
     except ValueError:
         return value
 
@@ -189,15 +220,16 @@ with st.sidebar:
         index=provider_ids.index(default_provider) if default_provider in provider_ids else 0,
         format_func=lambda item: provider_labels.get(item, item),
     )
-    default_model = next((item["default_model"] for item in provider_options if item["id"] == provider), "qwen2.5-coder")
+    default_model = next((item["default_model"] for item in provider_options if item["id"] == provider), "qwen3:4b")
     model = st.text_input("Model", value=default_model)
     st.divider()
     st.header("Local Commands")
-    st.code("ollama pull qwen2.5-coder\nollama serve\nuvicorn app.main:app --reload\nstreamlit run dashboard/app.py")
+    st.code("ollama pull qwen3:4b\nollama serve\nuvicorn app.main:app --reload\nstreamlit run dashboard/app.py")
 
 recent_runs = api_request("GET", "/api/runs", params={"limit": 20}) or []
-if "current_run_id" not in st.session_state and recent_runs:
-    st.session_state.current_run_id = recent_runs[0]["id"]
+if "app_initialized" not in st.session_state:
+    st.session_state.pop("current_run_id", None)
+    st.session_state["app_initialized"] = True
 
 left, right = st.columns([1.05, 0.95])
 with left:
@@ -207,7 +239,7 @@ with left:
         height=180,
         placeholder="Example: Build a small FastAPI task tracker with a Streamlit dashboard and Docker setup.",
     )
-    if st.button("Start Run", type="primary", use_container_width=True):
+    if st.button("Start Run", type="primary", width="stretch"):
         payload = {"requirement": requirement, "provider": provider, "model": model}
         if not requirement.strip():
             st.warning("Enter a software requirement first.")
@@ -221,15 +253,17 @@ with right:
     st.subheader("Recent Runs")
     if recent_runs:
         labels = {run["id"]: f"Run {run['id']} - {run['status']} - {format_time(run['created_at'])}" for run in recent_runs}
+        options = [None] + [run["id"] for run in recent_runs]
         selected = st.selectbox(
             "Open run",
-            [run["id"] for run in recent_runs],
+            options,
             index=0,
-            format_func=lambda run_id: labels[run_id],
+            format_func=lambda run_id: "Select a run" if run_id is None else labels[run_id],
         )
-        if st.button("Open Selected Run", use_container_width=True):
-            st.session_state.current_run_id = selected
-            st.rerun()
+        if st.button("Open Selected Run", width="stretch"):
+            if selected is not None:
+                st.session_state.current_run_id = selected
+                st.rerun()
     else:
         st.info("No runs yet.")
 
@@ -244,16 +278,16 @@ if run_id:
         control_cols = st.columns([1, 1, 1, 2])
         with control_cols[0]:
             if detail["status"] == "waiting_approval":
-                if st.button("Approve Deployment", type="primary", use_container_width=True):
+                if st.button("Approve Deployment", type="primary", width="stretch"):
                     api_request("POST", f"/api/runs/{run_id}/approve-deployment")
                     st.rerun()
         with control_cols[1]:
             if detail["status"] in {"running", "waiting_approval"}:
-                if st.button("Stop Run", use_container_width=True):
+                if st.button("Stop Run", width="stretch"):
                     api_request("POST", f"/api/runs/{run_id}/stop")
                     st.rerun()
         with control_cols[2]:
-            if st.button("Restart Run", use_container_width=True):
+            if st.button("Restart Run", width="stretch"):
                 restarted = api_request("POST", f"/api/runs/{run_id}/restart")
                 if restarted:
                     st.session_state.current_run_id = restarted["id"]
@@ -265,6 +299,17 @@ if run_id:
                 f"**Provider:** `{detail['provider']}` / `{detail['model']}`"
             )
 
+        progress_pct = compute_progress(detail, statuses)
+
+        progress_cols = st.columns([3, 1])
+        with progress_cols[0]:
+            st.subheader("Live run progress")
+            st.progress(progress_pct)
+            st.markdown(f"**{progress_pct}% complete** — Current stage: `{detail['current_stage']}`")
+        with progress_cols[1]:
+            st.metric("Run status", detail["status"])
+            st.metric("Current stage", detail["current_stage"])
+
         st.markdown(progress_html(detail, statuses), unsafe_allow_html=True)
 
         agent_cols = st.columns(4)
@@ -274,6 +319,9 @@ if run_id:
 
         log_tab, file_tab, message_tab = st.tabs(["Live Activity Log", "Generated Files", "Agent Messages"])
         with log_tab:
+            st.subheader("Agent action feed")
+            render_agent_action_feed(detail["logs"])
+            st.divider()
             render_logs(detail["logs"])
 
         with file_tab:

@@ -12,7 +12,7 @@ class ProviderOption:
 
 
 PROVIDER_OPTIONS = [
-    ProviderOption("ollama", "Ollama", "qwen2.5-coder", False),
+    ProviderOption("ollama", "Ollama", "qwen3:4b", False),
     ProviderOption("openai", "OpenAI", "gpt-4o-mini", True),
     ProviderOption("anthropic", "Claude/Anthropic", "claude-3-5-sonnet-latest", True),
 ]

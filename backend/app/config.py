@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     generated_projects_dir: Path = Field(default=Path("generated_projects"))
 
     llm_provider: str = "ollama"
-    llm_model: str = "qwen2.5-coder"
+    llm_model: str = "qwen3:4b"
     ollama_base_url: str = "http://localhost:11434"
 
     openai_api_key: str | None = None
