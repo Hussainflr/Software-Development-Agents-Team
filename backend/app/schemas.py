@@ -125,10 +125,24 @@ class ProviderOptionResponse(BaseModel):
     requires_api_key: bool
 
 
+class ModelRecommendationResponse(BaseModel):
+    provider: str
+    model: str
+    label: str
+    reason: str
+
+
 class ProvidersResponse(BaseModel):
     default_provider: str
     default_model: str
     options: list[ProviderOptionResponse]
+    ollama_running: bool = False
+    ollama_models: list[str] = Field(default_factory=list)
+    detected_model: str | None = None
+    suggested_provider: str = DEFAULT_PROVIDER
+    suggested_model: str = DEFAULT_MODEL
+    model_recommendations: list[ModelRecommendationResponse] = Field(default_factory=list)
+    message: str = ""
 
 
 class ActionResponse(BaseModel):

@@ -9,3 +9,6 @@ class ProviderConfigurationError(LLMError):
 class ProviderConnectionError(LLMError):
     """Raised when a local or remote provider cannot be reached."""
 
+
+class ProviderModelNotFoundError(LLMError):
+    """Raised when the selected provider is reachable but the model is missing."""

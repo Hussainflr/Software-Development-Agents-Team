@@ -1,1 +1,0 @@
-Design the backend architecture, API routes, and persistence model. Generate FastAPI backend code and include comments only around non-obvious choices.

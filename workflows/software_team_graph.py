@@ -250,7 +250,12 @@ class SoftwareTeamWorkflow:
             if captures_bugs:
                 updated["bugs_found"] = bool(result.bugs)
                 updated["bug_report"] = "\n".join(result.bugs)
-                evaluation = self.evaluator.score(artifacts, result.bugs)
+                evaluation = self.evaluator.score(
+                    artifacts,
+                    result.bugs,
+                    requirement=state["requirement"],
+                    llm_judge=chat_provider.chat_model,
+                )
                 updated["evaluation_passed"] = evaluation.passed
                 self.repository.add_evaluation(run_id, **evaluation.model_dump())
                 self.short_term_memory.remember(run_id, "latest_evaluation", evaluation.model_dump_json())

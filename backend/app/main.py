@@ -17,7 +17,15 @@ from backend.app.schemas import (
 )
 from database.repository import Repository
 from database.session import init_db
-from llm_providers.factory import normalize_provider, provider_options
+from llm_providers.base import ProviderConnectionError, ProviderModelNotFoundError
+from llm_providers.factory import (
+    model_recommendations,
+    normalize_provider,
+    ollama_discovery_status,
+    provider_options,
+    resolve_model,
+    suggested_provider_model,
+)
 from workflows.software_team_graph import SoftwareTeamWorkflow
 
 
@@ -70,10 +78,16 @@ def health() -> dict[str, str]:
 
 @app.get("/api/providers", response_model=ProvidersResponse)
 def providers() -> ProvidersResponse:
+    discovery = ollama_discovery_status()
+    suggested_provider, suggested_model = suggested_provider_model(discovery)
     return ProvidersResponse(
-        default_provider=settings.llm_provider,
-        default_model=settings.llm_model,
+        default_provider=suggested_provider,
+        default_model=suggested_model,
         options=provider_options(),
+        suggested_provider=suggested_provider,
+        suggested_model=suggested_model,
+        model_recommendations=model_recommendations(discovery),
+        **discovery,
     )
 
 
@@ -83,11 +97,17 @@ def create_run(payload: RunCreate) -> RunResponse:
         provider = normalize_provider(payload.provider)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    try:
+        model = resolve_model(provider, payload.model)
+    except ProviderConnectionError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except ProviderModelNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     run = repository.create_run(
         requirement=payload.requirement.strip(),
         provider=provider,
-        model=payload.model.strip(),
+        model=model,
     )
     launch_background(workflow.run_until_approval, run.id)
     return RunResponse.model_validate(run)

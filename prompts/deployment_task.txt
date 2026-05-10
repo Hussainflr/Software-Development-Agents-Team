@@ -1,1 +1,0 @@
-Prepare Docker and local deployment artifacts for the generated project. Include a Dockerfile, docker-compose file, and local run instructions.

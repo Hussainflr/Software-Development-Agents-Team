@@ -6,7 +6,7 @@ from skills.fallback_artifacts import deployment_fallback
 class DeploymentAgent(BaseAgent):
     name = "Deployment Agent"
     role = "DevOps Engineer"
-    task_prompt = "deployment_task.txt"
+    task_prompt = "deployment_task.md"
     skill_names = ["dockerfile_generation"]
 
     def fallback_output(self, agent_input: AgentInput, raw_response: str) -> AgentOutput:

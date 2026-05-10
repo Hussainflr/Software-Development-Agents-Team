@@ -1,1 +1,1 @@
-"""Reusable skills used by LangChain agents and workflow infrastructure."""
+"""Markdown-backed skills used by LangChain agents."""

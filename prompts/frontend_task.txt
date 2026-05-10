@@ -1,1 +1,0 @@
-Create UI/dashboard code that calls the generated backend APIs. Prefer a simple Streamlit implementation for the local demo.

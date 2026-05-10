@@ -1,38 +1,64 @@
-from pydantic import BaseModel, Field
+from typing import Any
 
-
-class EvaluationScore(BaseModel):
-    correctness: int = Field(ge=0, le=10)
-    completeness: int = Field(ge=0, le=10)
-    code_quality: int = Field(ge=0, le=10)
-    passed: bool
-    summary: str
+from evaluation.deterministic import DeterministicEvaluator
+from evaluation.llm_judge import LLMJudge
+from evaluation.schemas import ChecklistResult, EvaluationScore, LLMJudgeResult
 
 
 class EvaluationScorer:
-    """Simple deterministic evaluator that can later be replaced by LLM judges."""
+    """Coordinates deterministic evaluation and optional LLM-as-judge review."""
 
     pass_threshold = 7
 
-    def score(self, artifacts: dict[str, str], bugs: list[str]) -> EvaluationScore:
-        has_backend = any(path.startswith("generated_backend/") for path in artifacts)
-        has_frontend = any(path.startswith("generated_frontend/") for path in artifacts)
-        has_tests = any(path.startswith("generated_tests/") for path in artifacts)
+    def __init__(
+        self,
+        deterministic: DeterministicEvaluator | None = None,
+        llm_judge_evaluator: LLMJudge | None = None,
+    ) -> None:
+        self.deterministic = deterministic or DeterministicEvaluator()
+        self.llm_judge_evaluator = llm_judge_evaluator or LLMJudge()
 
-        correctness = 5 + int(has_backend) * 2 + int(has_tests) * 2 - min(len(bugs), 3)
-        completeness = 4 + int(has_backend) * 2 + int(has_frontend) * 2 + int(has_tests) * 2
-        code_quality = 6 + int(not bugs) * 2 + int(has_tests)
+    def score(
+        self,
+        artifacts: dict[str, str],
+        bugs: list[str],
+        requirement: str = "",
+        llm_judge: Any | None = None,
+    ) -> EvaluationScore:
+        deterministic = self.deterministic.score(artifacts, bugs)
+        llm_result: LLMJudgeResult | None = None
+        llm_error = ""
 
-        correctness = max(0, min(10, correctness))
-        completeness = max(0, min(10, completeness))
-        code_quality = max(0, min(10, code_quality))
-        passed = min(correctness, completeness, code_quality) >= self.pass_threshold and not bugs
+        if llm_judge is not None:
+            try:
+                llm_result = self.llm_judge_evaluator.score(
+                    requirement=requirement,
+                    artifacts=artifacts,
+                    bugs=bugs,
+                    chat_model=llm_judge,
+                )
+            except Exception as exc:
+                llm_error = f"LLM judge unavailable: {exc}"
 
-        summary = (
-            "Evaluation passed. Generated artifacts are complete enough for approval."
-            if passed
-            else "Evaluation failed. Send feedback through the refinement loop."
-        )
+        if llm_result:
+            correctness = min(deterministic.score.correctness, llm_result.correctness)
+            completeness = min(deterministic.score.completeness, llm_result.completeness)
+            code_quality = min(deterministic.score.code_quality, llm_result.code_quality)
+            passed = (
+                deterministic.score.passed
+                and llm_result.passed
+                and min(correctness, completeness, code_quality) >= self.pass_threshold
+            )
+            summary = self._combined_summary(deterministic, llm_result)
+        else:
+            correctness = deterministic.score.correctness
+            completeness = deterministic.score.completeness
+            code_quality = deterministic.score.code_quality
+            passed = deterministic.score.passed
+            summary = deterministic.score.summary
+            if llm_error:
+                summary = f"{summary} {llm_error}"
+
         return EvaluationScore(
             correctness=correctness,
             completeness=completeness,
@@ -40,3 +66,14 @@ class EvaluationScorer:
             passed=passed,
             summary=summary,
         )
+
+    @staticmethod
+    def _combined_summary(deterministic: ChecklistResult, llm_result: LLMJudgeResult) -> str:
+        failed = "; ".join(deterministic.failed_checks[:5]) or "none"
+        findings = "; ".join(llm_result.findings[:5]) or "none"
+        return (
+            f"Hybrid evaluation complete. Deterministic: {deterministic.score.summary} "
+            f"LLM judge: {llm_result.summary}. "
+            f"Deterministic failed checks: {failed}. LLM findings: {findings}."
+        )
+

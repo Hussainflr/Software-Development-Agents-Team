@@ -1,1 +1,0 @@
-Review the generated backend and frontend artifacts. Write unit tests, identify bugs, and return concrete suggestions. If the project is acceptable, return an empty bugs array.

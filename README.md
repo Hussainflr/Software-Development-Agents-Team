@@ -75,13 +75,20 @@ Mission Control has a `Memory & Context` tab that shows both memory layers and t
 
 ## Evaluation
 
-The evaluation layer scores:
+The evaluation layer uses a hybrid approach:
+
+- deterministic checklist scoring for required artifacts and obvious quality signals
+- optional LLM-as-judge review using the selected chat model during the Tester stage
+
+The implementation is split across `evaluation/schemas.py`, `evaluation/deterministic.py`, `evaluation/llm_judge.py`, and `evaluation/scorer.py` so new checks or judges can be added without bloating the workflow.
+
+It scores:
 
 - correctness
 - completeness
 - code quality
 
-If testing or evaluation fails, the workflow triggers the refinement loop before waiting for deployment approval.
+If testing, deterministic evaluation, or LLM judge evaluation fails, the workflow triggers the refinement loop before waiting for deployment approval.
 
 ## Local Setup
 
@@ -98,6 +105,17 @@ Install and start Ollama:
 ollama pull qwen2.5-coder
 ollama serve
 ```
+
+Mission Control now auto-detects running Ollama models from `http://localhost:11434/api/tags`.
+If Ollama is running and models are installed, the dashboard selects a local model automatically.
+If Ollama is not running, the dashboard tells you to start it and pull a recommended model.
+
+Model selection behavior:
+
+- Local default: use the detected Ollama model if one is installed.
+- Local recommendation: `qwen2.5-coder`, install with `ollama pull qwen2.5-coder`.
+- Cloud recommendation: OpenAI `gpt-5.2` when `OPENAI_API_KEY` is configured.
+- Alternative cloud option: Anthropic `claude-3-5-sonnet-latest` when `ANTHROPIC_API_KEY` is configured.
 
 Run the API:
 
@@ -119,7 +137,7 @@ Open:
 ## Demo Flow
 
 1. Paste a requirement into Mission Control, or use `samples/demo_prompt.md`.
-2. Select provider `Ollama` and model `qwen2.5-coder` or `llama3.1`.
+2. Select provider `Ollama`; the dashboard will auto-detect an installed local model.
 3. Click `Start Run`.
 4. Watch agent status cards, the live log, memory, context, and evaluation tabs.
 5. Review generated files after Backend, Frontend, and Tester complete.
@@ -201,7 +219,7 @@ docker compose exec ollama ollama pull qwen2.5-coder
 ## Add A New Agent
 
 1. Create a prompt file in `prompts/`.
-2. Add any reusable ability to `skills/` and document it in `skills.md`.
+2. Add any reusable ability as a Markdown file in `skills/` and register it in `skills/registry.py`.
 3. Create an agent class in `agents/` using `BaseAgent`.
 4. Add the agent name to `database/repository.py`.
 5. Add a node and routing rule in `workflows/software_team_graph.py`.

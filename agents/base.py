@@ -14,27 +14,30 @@ from skills.registry import render_skill_registry
 class BaseAgent(ABC):
     name = "Base Agent"
     role = "Generalist"
-    task_prompt = "agent_task.txt"
+    task_prompt = "agent_task.md"
     skill_names: list[str] = []
 
     def invoke(self, agent_input: AgentInput, chat_model: Any) -> AgentOutput:
         """Run this agent as a LangChain prompt -> chat model -> Pydantic parser chain."""
 
         payload = self._build_payload(agent_input)
-        chain = self.as_runnable(chat_model)
         try:
-            result = chain.invoke(payload)
-            if not result.artifacts:
-                return self.fallback_output(agent_input, "LangChain parser returned no artifacts.")
-            return result
-        except Exception as exc:
             raw_response = self._invoke_raw(chat_model, payload)
-            fallback_reason = raw_response or f"LangChain agent failed: {exc}"
-            return self.fallback_output(agent_input, fallback_reason)
+        except Exception as exc:
+            raise RuntimeError(f"{self.name} LLM call failed: {exc}") from exc
+
+        try:
+            result = parse_agent_output(raw_response)
+        except ValueError:
+            return self.fallback_output(agent_input, raw_response)
+
+        if not result.artifacts:
+            return self.fallback_output(agent_input, "LangChain parser returned no artifacts.")
+        return result
 
     def as_runnable(self, chat_model: Any):
         parser = PydanticOutputParser(pydantic_object=AgentOutput)
-        return self.prompt_template() | chat_model.bind(temperature=0.2).with_retry(stop_after_attempt=3) | parser
+        return self.prompt_template() | chat_model.with_retry(stop_after_attempt=3) | parser
 
     def runnable(self, chat_model: Any):
         return RunnableLambda(lambda data: self.invoke(AgentInput.model_validate(data), chat_model))
@@ -42,8 +45,8 @@ class BaseAgent(ABC):
     def prompt_template(self) -> ChatPromptTemplate:
         return ChatPromptTemplate.from_messages(
             [
-                ("system", load_prompt("system.txt")),
-                ("human", load_prompt("agent_task.txt")),
+                ("system", load_prompt("system.md")),
+                ("human", load_prompt("agent_task.md")),
             ]
         )
 
@@ -73,11 +76,8 @@ class BaseAgent(ABC):
         }
 
     def _invoke_raw(self, chat_model: Any, payload: dict[str, str]) -> str:
-        try:
-            response = (self.prompt_template() | chat_model.bind(temperature=0.2)).invoke(payload)
-            return str(getattr(response, "content", response)).strip()
-        except Exception:
-            return ""
+        response = (self.prompt_template() | chat_model.with_retry(stop_after_attempt=3)).invoke(payload)
+        return str(getattr(response, "content", response)).strip()
 
     @abstractmethod
     def fallback_output(self, agent_input: AgentInput, raw_response: str) -> AgentOutput:

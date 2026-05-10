@@ -96,8 +96,25 @@ def get_providers() -> dict:
             "default_provider": "ollama",
             "default_model": "qwen2.5-coder",
             "options": [{"id": "ollama", "label": "Ollama", "default_model": "qwen2.5-coder"}],
+            "ollama_running": False,
+            "ollama_models": [],
+            "detected_model": None,
+            "suggested_provider": "ollama",
+            "suggested_model": "auto",
+            "model_recommendations": [],
+            "message": "Mission Control API is unavailable.",
         }
     return data
+
+
+def unique_models(models: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for model_name in models:
+        if model_name and model_name not in seen:
+            seen.add(model_name)
+            ordered.append(model_name)
+    return ordered
 
 
 def status_card(agent_name: str, status: str) -> str:
@@ -223,6 +240,10 @@ provider_options = providers["options"]
 provider_ids = [item["id"] for item in provider_options]
 provider_labels = {item["id"]: item["label"] for item in provider_options}
 default_provider = providers.get("default_provider", "ollama")
+ollama_running = bool(providers.get("ollama_running"))
+ollama_models = providers.get("ollama_models", [])
+detected_ollama_model = providers.get("detected_model")
+model_recommendations = providers.get("model_recommendations", [])
 
 st.title("Mission Control")
 st.caption("Human-managed AI software team running locally first with Ollama.")
@@ -236,10 +257,36 @@ with st.sidebar:
         format_func=lambda item: provider_labels.get(item, item),
     )
     default_model = next((item["default_model"] for item in provider_options if item["id"] == provider), "qwen2.5-coder")
-    model = st.text_input("Model", value=default_model)
+    if provider == "ollama":
+        if ollama_running and ollama_models:
+            model_options = unique_models([detected_ollama_model, *ollama_models, "auto"])
+            model = st.selectbox(
+                "Model",
+                model_options,
+                index=0,
+                help="Mission Control detected these models from your running Ollama instance.",
+            )
+            st.success(providers.get("message") or f"Detected local Ollama model: {model}")
+        elif ollama_running:
+            model = st.text_input("Model", value="auto")
+            st.warning("Ollama is running, but no models are installed. Pull a model and refresh.")
+            st.code("ollama pull qwen2.5-coder")
+        else:
+            model = st.text_input("Model", value="auto", disabled=True)
+            st.warning(providers.get("message") or "Ollama is not running. Start it and refresh this dashboard.")
+            st.code("ollama serve\nollama pull qwen2.5-coder")
+    else:
+        model = st.text_input("Model", value=default_model)
+    if model_recommendations:
+        st.caption("Recommended models")
+        for recommendation in model_recommendations[:3]:
+            st.markdown(
+                f"- `{recommendation['provider']}` / `{recommendation['model']}`: "
+                f"{recommendation['reason']}"
+            )
     st.divider()
     st.header("Local Commands")
-    st.code("ollama pull qwen2.5-coder\nollama serve\nuvicorn app.main:app --reload\nstreamlit run dashboard/app.py")
+    st.code("ollama serve\nollama pull qwen2.5-coder\nuvicorn app.main:app --reload\nstreamlit run dashboard/app.py")
 
 recent_runs = api_request("GET", "/api/runs", params={"limit": 20}) or []
 if "current_run_id" not in st.session_state and recent_runs:
@@ -253,7 +300,10 @@ with left:
         height=180,
         placeholder="Example: Build a small FastAPI task tracker with a Streamlit dashboard and Docker setup.",
     )
-    if st.button("Start Run", type="primary", use_container_width=True):
+    start_disabled = provider == "ollama" and not ollama_running
+    if start_disabled:
+        st.info("Start Ollama and refresh; Mission Control will detect the local model automatically.")
+    if st.button("Start Run", type="primary", use_container_width=True, disabled=start_disabled):
         payload = {"requirement": requirement, "provider": provider, "model": model}
         if not requirement.strip():
             st.warning("Enter a software requirement first.")
