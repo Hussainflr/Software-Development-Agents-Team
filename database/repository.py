@@ -1,10 +1,21 @@
+import json
 from collections.abc import Iterable
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from database.models import AgentLog, AgentMessage, AgentStatus, GeneratedFile, Run
+from database.models import (
+    AgentLog,
+    AgentMessage,
+    AgentStatus,
+    ContextSnapshot,
+    EvaluationResult,
+    GeneratedFile,
+    LongTermMemoryItem,
+    Run,
+    ShortTermMemoryItem,
+)
 from database.session import SessionLocal
 
 
@@ -66,12 +77,18 @@ class Repository:
         status: str = "info",
     ) -> AgentLog:
         with self.session_factory() as session:
+            payload = {
+                "agent": agent_name,
+                "action": action,
+                "status": status,
+                "summary": output_summary,
+            }
             log = AgentLog(
                 run_id=run_id,
                 agent_name=agent_name,
                 action=action,
                 status=status,
-                output_summary=output_summary,
+                output_summary=json.dumps(payload),
             )
             session.add(log)
             session.commit()
@@ -142,6 +159,106 @@ class Repository:
             statement = select(GeneratedFile).where(GeneratedFile.run_id == run_id).order_by(GeneratedFile.path.asc())
             return list(session.scalars(statement))
 
+    def add_context_snapshot(self, run_id: int, agent_name: str, payload: dict[str, str]) -> ContextSnapshot:
+        with self.session_factory() as session:
+            row = ContextSnapshot(run_id=run_id, agent_name=agent_name, payload_json=json.dumps(payload, indent=2))
+            session.add(row)
+            session.commit()
+            return row
+
+    def list_context_snapshots(self, run_id: int) -> list[ContextSnapshot]:
+        with self.session_factory() as session:
+            statement = (
+                select(ContextSnapshot)
+                .where(ContextSnapshot.run_id == run_id)
+                .order_by(ContextSnapshot.timestamp.asc())
+            )
+            return list(session.scalars(statement))
+
+    def upsert_short_term_memory(self, run_id: int, key: str, value: str) -> None:
+        with self.session_factory() as session:
+            statement = select(ShortTermMemoryItem).where(
+                ShortTermMemoryItem.run_id == run_id,
+                ShortTermMemoryItem.key == key,
+            )
+            row = session.scalar(statement)
+            if row:
+                row.value = value
+                row.updated_at = now_utc()
+            else:
+                session.add(ShortTermMemoryItem(run_id=run_id, key=key, value=value))
+            session.commit()
+
+    def list_short_term_memory(self, run_id: int) -> list[ShortTermMemoryItem]:
+        with self.session_factory() as session:
+            statement = (
+                select(ShortTermMemoryItem)
+                .where(ShortTermMemoryItem.run_id == run_id)
+                .order_by(ShortTermMemoryItem.updated_at.asc())
+            )
+            return list(session.scalars(statement))
+
+    def add_long_term_memory(
+        self,
+        category: str,
+        summary: str,
+        source_run_id: int | None = None,
+    ) -> LongTermMemoryItem:
+        with self.session_factory() as session:
+            row = LongTermMemoryItem(category=category, summary=summary, source_run_id=source_run_id)
+            session.add(row)
+            session.commit()
+            return row
+
+    def search_long_term_memory(self, query: str, limit: int = 5) -> list[LongTermMemoryItem]:
+        with self.session_factory() as session:
+            terms = [term.lower() for term in query.split() if len(term) > 3]
+            rows = list(session.scalars(select(LongTermMemoryItem).order_by(LongTermMemoryItem.created_at.desc())))
+            if not terms:
+                return rows[:limit]
+            scored = [
+                row
+                for row in rows
+                if any(term in f"{row.category} {row.summary}".lower() for term in terms)
+            ]
+            return scored[:limit]
+
+    def list_long_term_memory(self, limit: int = 20) -> list[LongTermMemoryItem]:
+        with self.session_factory() as session:
+            statement = select(LongTermMemoryItem).order_by(LongTermMemoryItem.created_at.desc()).limit(limit)
+            return list(session.scalars(statement))
+
+    def add_evaluation(
+        self,
+        run_id: int,
+        correctness: int,
+        completeness: int,
+        code_quality: int,
+        passed: bool,
+        summary: str,
+    ) -> EvaluationResult:
+        with self.session_factory() as session:
+            row = EvaluationResult(
+                run_id=run_id,
+                correctness=correctness,
+                completeness=completeness,
+                code_quality=code_quality,
+                passed=passed,
+                summary=summary,
+            )
+            session.add(row)
+            session.commit()
+            return row
+
+    def list_evaluations(self, run_id: int) -> list[EvaluationResult]:
+        with self.session_factory() as session:
+            statement = (
+                select(EvaluationResult)
+                .where(EvaluationResult.run_id == run_id)
+                .order_by(EvaluationResult.timestamp.asc())
+            )
+            return list(session.scalars(statement))
+
     def stop_requested(self, run_id: int) -> bool:
         run = self.get_run(run_id)
         return bool(run and run.stop_requested)
@@ -149,4 +266,3 @@ class Repository:
     def set_many_agent_statuses(self, run_id: int, agent_names: Iterable[str], status: str) -> None:
         for agent_name in agent_names:
             self.set_agent_status(run_id, agent_name, status)
-

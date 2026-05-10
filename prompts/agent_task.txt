@@ -1,0 +1,14 @@
+Human manager requirement:
+{user_requirement}
+
+Focused context:
+{focused_context}
+
+Available skills:
+{skills}
+
+Your current task:
+{task}
+
+Output format instructions:
+{format_instructions}

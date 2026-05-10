@@ -4,6 +4,8 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from config.defaults import DEFAULT_MODEL, DEFAULT_OLLAMA_BASE_URL, DEFAULT_PROVIDER
+
 
 class Settings(BaseSettings):
     """Runtime configuration loaded from environment variables."""
@@ -14,9 +16,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./agent_team.db"
     generated_projects_dir: Path = Field(default=Path("generated_projects"))
 
-    llm_provider: str = "ollama"
-    llm_model: str = "qwen3:4b"
-    ollama_base_url: str = "http://localhost:11434"
+    llm_provider: str = DEFAULT_PROVIDER
+    llm_model: str = DEFAULT_MODEL
+    ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
 
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
@@ -29,4 +31,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

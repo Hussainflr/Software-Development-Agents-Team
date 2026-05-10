@@ -1,10 +1,4 @@
-import sys
-from pathlib import Path
 import threading
-
-ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.config import get_settings
 from backend.app.schemas import (
     ActionResponse,
+    AgentLogResponse,
+    AgentStatusResponse,
+    EvaluationResponse,
+    GeneratedFileResponse,
     ProvidersResponse,
     RunCreate,
     RunDetailResponse,
@@ -58,6 +56,10 @@ def run_detail(run_id: int) -> RunDetailResponse:
         logs=repository.list_logs(run_id),
         files=repository.list_files(run_id),
         messages=repository.list_messages(run_id),
+        contexts=repository.list_context_snapshots(run_id),
+        short_term_memory=repository.list_short_term_memory(run_id),
+        long_term_memory=repository.list_long_term_memory(limit=20),
+        evaluations=repository.list_evaluations(run_id),
     )
 
 
@@ -99,6 +101,32 @@ def list_runs(limit: int = 20) -> list[RunResponse]:
 @app.get("/api/runs/{run_id}", response_model=RunDetailResponse)
 def get_run(run_id: int) -> RunDetailResponse:
     return run_detail(run_id)
+
+
+@app.get("/api/runs/{run_id}/logs")
+def get_logs(run_id: int) -> list[AgentLogResponse]:
+    if not repository.get_run(run_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return [AgentLogResponse.model_validate(row) for row in repository.list_logs(run_id)]
+
+
+@app.get("/api/runs/{run_id}/status")
+def get_status(run_id: int):
+    run = repository.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return {
+        "run": RunResponse.model_validate(run),
+        "agents": [AgentStatusResponse.model_validate(row) for row in repository.list_agent_statuses(run_id)],
+        "evaluations": [EvaluationResponse.model_validate(row) for row in repository.list_evaluations(run_id)],
+    }
+
+
+@app.get("/api/runs/{run_id}/outputs")
+def get_outputs(run_id: int) -> list[GeneratedFileResponse]:
+    if not repository.get_run(run_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return [GeneratedFileResponse.model_validate(row) for row in repository.list_files(run_id)]
 
 
 @app.post("/api/runs/{run_id}/approve-deployment", response_model=ActionResponse)

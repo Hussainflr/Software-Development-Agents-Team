@@ -2,11 +2,13 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from config.defaults import DEFAULT_MODEL, DEFAULT_PROVIDER
+
 
 class RunCreate(BaseModel):
     requirement: str = Field(min_length=5)
-    provider: str = "ollama"
-    model: str = "qwen3:4b"
+    provider: str = DEFAULT_PROVIDER
+    model: str = DEFAULT_MODEL
 
 
 class RunResponse(BaseModel):
@@ -65,11 +67,55 @@ class AgentMessageResponse(BaseModel):
     content: str
 
 
+class ContextSnapshotResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    timestamp: datetime
+    agent_name: str
+    payload_json: str
+
+
+class ShortTermMemoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    key: str
+    value: str
+    updated_at: datetime
+
+
+class LongTermMemoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    category: str
+    summary: str
+    source_run_id: int | None
+    created_at: datetime
+
+
+class EvaluationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    timestamp: datetime
+    correctness: int
+    completeness: int
+    code_quality: int
+    passed: bool
+    summary: str
+
+
 class RunDetailResponse(RunResponse):
     statuses: list[AgentStatusResponse]
     logs: list[AgentLogResponse]
     files: list[GeneratedFileResponse]
     messages: list[AgentMessageResponse]
+    contexts: list[ContextSnapshotResponse]
+    short_term_memory: list[ShortTermMemoryResponse]
+    long_term_memory: list[LongTermMemoryResponse]
+    evaluations: list[EvaluationResponse]
 
 
 class ProviderOptionResponse(BaseModel):
@@ -88,4 +134,3 @@ class ProvidersResponse(BaseModel):
 class ActionResponse(BaseModel):
     message: str
     run: RunResponse | None = None
-

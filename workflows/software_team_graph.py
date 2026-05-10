@@ -4,13 +4,18 @@ from typing import Literal, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from agents.backend_agent import BackendAgent
-from agents.base import AgentContext, BaseAgent
+from agents.base import BaseAgent
+from agents.schemas import AgentInput
 from agents.deployment_agent import DeploymentAgent
 from agents.frontend_agent import FrontendAgent
 from agents.tester_agent import TesterAgent
 from backend.app.config import get_settings
+from context.context_builder import ContextBuilder
 from database.repository import AGENTS, Repository
-from llm_providers.factory import build_llm_client
+from evaluation.scorer import EvaluationScorer
+from llm_providers.factory import build_chat_provider
+from memory.long_term_memory import LongTermMemory
+from memory.short_term_memory import ShortTermMemory
 from tools.file_writer import write_artifacts
 
 
@@ -23,6 +28,7 @@ class SoftwareTeamState(TypedDict, total=False):
     messages: list[str]
     bug_report: str
     bugs_found: bool
+    evaluation_passed: bool
     revision_count: int
     stopped: bool
     failed: bool
@@ -34,6 +40,10 @@ class SoftwareTeamWorkflow:
     def __init__(self, repository: Repository | None = None) -> None:
         self.repository = repository or Repository()
         self.settings = get_settings()
+        self.context_builder = ContextBuilder()
+        self.short_term_memory = ShortTermMemory(repository=self.repository)
+        self.long_term_memory = LongTermMemory(repository=self.repository)
+        self.evaluator = EvaluationScorer()
         self.initial_graph = self._build_initial_graph().compile()
         self.deployment_graph = self._build_deployment_graph().compile()
 
@@ -60,6 +70,7 @@ class SoftwareTeamWorkflow:
             "messages": [],
             "bug_report": "",
             "bugs_found": False,
+            "evaluation_passed": False,
             "revision_count": 0,
         }
         final_state = self.initial_graph.invoke(state)
@@ -98,6 +109,7 @@ class SoftwareTeamWorkflow:
             "messages": [message.content for message in self.repository.list_messages(run_id)],
             "bug_report": "",
             "bugs_found": False,
+            "evaluation_passed": False,
             "revision_count": 0,
         }
         final_state = self.deployment_graph.invoke(state)
@@ -189,22 +201,38 @@ class SoftwareTeamWorkflow:
         self.repository.add_log(run_id, agent.name, "Thinking", f"{agent.name} is planning the {stage} step.")
 
         try:
-            llm_client = build_llm_client(state.get("provider"), state.get("model"))
+            chat_provider = build_chat_provider(state.get("provider"), state.get("model"))
+            chat_provider.validate()
             self.repository.set_agent_status(run_id, agent.name, "working")
-            context = AgentContext(
+            retrieved_memory = self.long_term_memory.retrieve(state["requirement"], limit=3)
+            focused_context = self.context_builder.build(
+                user_requirement=state["requirement"],
+                current_task=stage,
+                agent_name=agent.name,
+                agent_role=agent.role,
+                artifacts=state.get("artifacts", {}),
+                constraints="Use complete relative file paths. Do not store or output secrets.",
+                errors_or_feedback=state.get("bug_report", ""),
+                long_term_memory=retrieved_memory,
+            )
+            self.repository.add_context_snapshot(run_id, agent.name, focused_context)
+            self.short_term_memory.remember(run_id, f"context:{agent.name}:{stage}", str(focused_context))
+            agent_input = AgentInput(
                 run_id=run_id,
                 requirement=state["requirement"],
+                focused_context=focused_context,
                 artifacts=state.get("artifacts", {}),
                 messages=state.get("messages", []),
                 bug_report=state.get("bug_report", ""),
                 revision=revision,
             )
-            result = agent.execute(context, llm_client)
+            result = agent.invoke(agent_input, chat_provider.chat_model)
             artifacts = {**state.get("artifacts", {}), **result.artifacts}
             run_dir = self.settings.generated_root / f"run_{run_id}"
             write_artifacts(run_dir, result.artifacts)
             self.repository.upsert_generated_files(run_id, agent.name, result.artifacts)
             self.repository.add_message(run_id, agent.name, "assistant", result.summary)
+            self.short_term_memory.remember(run_id, f"output:{agent.name}:{stage}", result.summary)
             self.repository.add_log(
                 run_id,
                 agent.name,
@@ -222,6 +250,17 @@ class SoftwareTeamWorkflow:
             if captures_bugs:
                 updated["bugs_found"] = bool(result.bugs)
                 updated["bug_report"] = "\n".join(result.bugs)
+                evaluation = self.evaluator.score(artifacts, result.bugs)
+                updated["evaluation_passed"] = evaluation.passed
+                self.repository.add_evaluation(run_id, **evaluation.model_dump())
+                self.short_term_memory.remember(run_id, "latest_evaluation", evaluation.model_dump_json())
+                self.repository.add_log(
+                    run_id,
+                    "Evaluation",
+                    "Scored artifacts",
+                    evaluation.model_dump_json(),
+                    status="success" if evaluation.passed else "warning",
+                )
                 if result.bugs:
                     self.repository.add_log(
                         run_id,
@@ -245,15 +284,21 @@ class SoftwareTeamWorkflow:
     def _route_after_testing(self, state: SoftwareTeamState) -> Literal["revise", "approval", "end"]:
         if state.get("failed") or state.get("stopped"):
             return "end"
-        if state.get("bugs_found") and int(state.get("revision_count", 0)) < 1:
+        needs_revision = state.get("bugs_found") or not state.get("evaluation_passed", False)
+        if needs_revision and int(state.get("revision_count", 0)) < 1:
             run_id = int(state["run_id"])
             self.repository.add_log(
                 run_id,
                 "Tester Agent",
                 "Feedback loop",
-                "Bugs were found. Sending feedback back to Backend and Frontend agents for one revision pass.",
+                "Testing or evaluation found issues. Sending feedback back to Backend and Frontend agents for one revision pass.",
                 status="warning",
             )
             return "revise"
+        if state.get("evaluation_passed"):
+            self.long_term_memory.remember(
+                "successful_solution",
+                f"Requirement: {state['requirement']}\nArtifacts: {', '.join(sorted(state.get('artifacts', {})))}",
+                source_run_id=int(state["run_id"]),
+            )
         return "approval"
-

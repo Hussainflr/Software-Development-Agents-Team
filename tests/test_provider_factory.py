@@ -6,5 +6,5 @@ def test_normalize_provider_accepts_claude_alias():
 
 
 def test_normalize_model_name_prefixes_ollama():
-    assert normalize_model_name("ollama", "qwen3:4b") == "ollama/qwen3:4b"
+    assert normalize_model_name("ollama", "qwen2.5-coder") == "ollama/qwen2.5-coder"
 

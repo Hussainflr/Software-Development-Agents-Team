@@ -1,95 +1,101 @@
 import json
-from dataclasses import dataclass, field
-from textwrap import dedent
+from abc import ABC, abstractmethod
+from typing import Any
 
-from llm_providers.base import ChatMessage, LLMClient
+from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableLambda
 
-
-@dataclass
-class AgentContext:
-    run_id: int
-    requirement: str
-    artifacts: dict[str, str] = field(default_factory=dict)
-    messages: list[str] = field(default_factory=list)
-    bug_report: str = ""
-    revision: bool = False
+from agents.schemas import AgentInput, AgentOutput
+from prompts.loader import load_prompt
+from skills.registry import render_skill_registry
 
 
-@dataclass
-class AgentResult:
-    summary: str
-    artifacts: dict[str, str] = field(default_factory=dict)
-    notes: list[str] = field(default_factory=list)
-    bugs: list[str] = field(default_factory=list)
-    raw_response: str = ""
-
-
-class BaseAgent:
+class BaseAgent(ABC):
     name = "Base Agent"
     role = "Generalist"
+    task_prompt = "agent_task.txt"
+    skill_names: list[str] = []
 
-    def execute(self, context: AgentContext, llm_client: LLMClient) -> AgentResult:
-        messages = self._build_messages(context)
-        raw_response = llm_client.generate(messages=messages, temperature=0.2)
+    def invoke(self, agent_input: AgentInput, chat_model: Any) -> AgentOutput:
+        """Run this agent as a LangChain prompt -> chat model -> Pydantic parser chain."""
+
+        payload = self._build_payload(agent_input)
+        chain = self.as_runnable(chat_model)
         try:
-            parsed = parse_agent_json(raw_response)
-            if not parsed.artifacts:
-                return self.fallback_output(context, raw_response)
-            parsed.raw_response = raw_response
-            return parsed
-        except ValueError:
-            return self.fallback_output(context, raw_response)
+            result = chain.invoke(payload)
+            if not result.artifacts:
+                return self.fallback_output(agent_input, "LangChain parser returned no artifacts.")
+            return result
+        except Exception as exc:
+            raw_response = self._invoke_raw(chat_model, payload)
+            fallback_reason = raw_response or f"LangChain agent failed: {exc}"
+            return self.fallback_output(agent_input, fallback_reason)
 
-    def _build_messages(self, context: AgentContext) -> list[ChatMessage]:
-        artifact_index = "\n".join(f"- {path}" for path in sorted(context.artifacts)) or "- No artifacts yet"
+    def as_runnable(self, chat_model: Any):
+        parser = PydanticOutputParser(pydantic_object=AgentOutput)
+        return self.prompt_template() | chat_model.bind(temperature=0.2).with_retry(stop_after_attempt=3) | parser
+
+    def runnable(self, chat_model: Any):
+        return RunnableLambda(lambda data: self.invoke(AgentInput.model_validate(data), chat_model))
+
+    def prompt_template(self) -> ChatPromptTemplate:
+        return ChatPromptTemplate.from_messages(
+            [
+                ("system", load_prompt("system.txt")),
+                ("human", load_prompt("agent_task.txt")),
+            ]
+        )
+
+    def _build_payload(self, agent_input: AgentInput) -> dict[str, str]:
+        artifact_index = "\n".join(f"- {path}" for path in sorted(agent_input.artifacts)) or "- No artifacts yet"
         revision_note = (
-            f"\nTester feedback to address:\n{context.bug_report}\n"
-            if context.revision and context.bug_report
+            f"\nTester feedback to address:\n{agent_input.bug_report}\n"
+            if agent_input.revision and agent_input.bug_report
             else ""
         )
-        system_prompt = dedent(
-            f"""
-            You are {self.name}, acting as the {self.role} in an agentic software development team.
-            Work like a senior engineer. Be practical, concise, and implementation-oriented.
-            Return only valid JSON. Do not wrap the JSON in Markdown fences.
-            """
-        ).strip()
-        user_prompt = dedent(
-            f"""
-            Human manager requirement:
-            {context.requirement}
+        parser = PydanticOutputParser(pydantic_object=AgentOutput)
+        focused_context = agent_input.focused_context or {
+            "user_requirement": agent_input.requirement,
+            "agent_role": self.role,
+            "relevant_outputs": artifact_index,
+            "constraints": "Return complete file contents for every artifact. Keep secrets out of outputs.",
+            "errors_or_feedback": revision_note.strip() or "None",
+        }
+        return {
+            "agent_name": self.name,
+            "agent_role": self.role,
+            "user_requirement": agent_input.requirement,
+            "focused_context": json.dumps(focused_context, indent=2),
+            "skills": render_skill_registry(self.skill_names),
+            "task": load_prompt(self.task_prompt),
+            "format_instructions": parser.get_format_instructions(),
+        }
 
-            Existing artifact paths:
-            {artifact_index}
-            {revision_note}
+    def _invoke_raw(self, chat_model: Any, payload: dict[str, str]) -> str:
+        try:
+            response = (self.prompt_template() | chat_model.bind(temperature=0.2)).invoke(payload)
+            return str(getattr(response, "content", response)).strip()
+        except Exception:
+            return ""
 
-            Your task:
-            {self.task_instructions()}
-
-            Return this exact JSON shape:
-            {{
-              "summary": "short summary of what you did",
-              "artifacts": {{
-                "relative/path.ext": "complete file contents"
-              }},
-              "notes": ["important implementation note"],
-              "bugs": []
-            }}
-            """
-        ).strip()
-        return [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
-    def task_instructions(self) -> str:
-        raise NotImplementedError
-
-    def fallback_output(self, context: AgentContext, raw_response: str) -> AgentResult:
+    @abstractmethod
+    def fallback_output(self, agent_input: AgentInput, raw_response: str) -> AgentOutput:
         raise NotImplementedError
 
 
-def parse_agent_json(raw_response: str) -> AgentResult:
+def parse_agent_output(raw_response: str) -> AgentOutput:
+    parser = PydanticOutputParser(pydantic_object=AgentOutput)
+    try:
+        return parser.parse(raw_response)
+    except Exception as exc:
+        try:
+            return AgentOutput(**parse_agent_json(raw_response).model_dump())
+        except ValueError:
+            raise ValueError("LLM response did not match the required agent schema.") from exc
+
+
+def parse_agent_json(raw_response: str) -> AgentOutput:
     """Parse a model JSON response, tolerating small amounts of surrounding text."""
 
     cleaned = raw_response.strip()
@@ -128,10 +134,9 @@ def parse_agent_json(raw_response: str) -> AgentResult:
     if isinstance(bugs, str):
         bugs = [bugs]
 
-    return AgentResult(
+    return AgentOutput(
         summary=str(data.get("summary") or "Agent completed its task."),
         artifacts={str(path): str(content) for path, content in artifacts.items()},
         notes=[str(note) for note in notes],
         bugs=[str(bug) for bug in bugs],
     )
-

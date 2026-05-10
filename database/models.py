@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from config.defaults import DEFAULT_MODEL, DEFAULT_PROVIDER
 from database.session import Base
 
 
@@ -15,8 +16,8 @@ class Run(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     requirement: Mapped[str] = mapped_column(Text)
-    provider: Mapped[str] = mapped_column(String(40), default="ollama")
-    model: Mapped[str] = mapped_column(String(120), default="qwen3:4b")
+    provider: Mapped[str] = mapped_column(String(40), default=DEFAULT_PROVIDER)
+    model: Mapped[str] = mapped_column(String(120), default=DEFAULT_MODEL)
     status: Mapped[str] = mapped_column(String(40), default="created")
     current_stage: Mapped[str] = mapped_column(String(80), default="requirement")
     approved_for_deployment: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -30,6 +31,9 @@ class Run(Base):
     files: Mapped[list["GeneratedFile"]] = relationship(back_populates="run", cascade="all, delete-orphan")
     statuses: Mapped[list["AgentStatus"]] = relationship(back_populates="run", cascade="all, delete-orphan")
     messages: Mapped[list["AgentMessage"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    contexts: Mapped[list["ContextSnapshot"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    short_term_memory: Mapped[list["ShortTermMemoryItem"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    evaluations: Mapped[list["EvaluationResult"]] = relationship(back_populates="run", cascade="all, delete-orphan")
 
 
 class AgentStatus(Base):
@@ -83,3 +87,51 @@ class GeneratedFile(Base):
 
     run: Mapped[Run] = relationship(back_populates="files")
 
+
+class ContextSnapshot(Base):
+    __tablename__ = "context_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    agent_name: Mapped[str] = mapped_column(String(80), index=True)
+    payload_json: Mapped[str] = mapped_column(Text)
+
+    run: Mapped[Run] = relationship(back_populates="contexts")
+
+
+class ShortTermMemoryItem(Base):
+    __tablename__ = "short_term_memory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), index=True)
+    key: Mapped[str] = mapped_column(String(120), index=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    run: Mapped[Run] = relationship(back_populates="short_term_memory")
+
+
+class LongTermMemoryItem(Base):
+    __tablename__ = "long_term_memory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    category: Mapped[str] = mapped_column(String(120), index=True)
+    summary: Mapped[str] = mapped_column(Text)
+    source_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class EvaluationResult(Base):
+    __tablename__ = "evaluation_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    correctness: Mapped[int] = mapped_column(Integer)
+    completeness: Mapped[int] = mapped_column(Integer)
+    code_quality: Mapped[int] = mapped_column(Integer)
+    passed: Mapped[bool] = mapped_column(Boolean, default=False)
+    summary: Mapped[str] = mapped_column(Text)
+
+    run: Mapped[Run] = relationship(back_populates="evaluations")

@@ -1,6 +1,7 @@
 import os
+import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 
 import requests
 import streamlit as st
@@ -9,6 +10,18 @@ import streamlit as st
 API_URL = os.getenv("MISSION_CONTROL_API_URL", "http://localhost:8000").rstrip("/")
 AGENT_ORDER = ["Backend Agent", "Frontend Agent", "Tester Agent", "Deployment Agent"]
 STAGES = ["Requirement", "Backend", "Frontend", "Testing", "Deployment"]
+STAGE_PROGRESS = {
+    "requirement": 5,
+    "backend": 20,
+    "backend_revision": 35,
+    "frontend": 45,
+    "frontend_revision": 60,
+    "testing": 75,
+    "deployment_approval": 85,
+    "deployment": 92,
+    "completed": 100,
+    "stopped": 0,
+}
 STATUS_COLORS = {
     "idle": "#6b7280",
     "thinking": "#b7791f",
@@ -81,8 +94,8 @@ def get_providers() -> dict:
     if not data:
         return {
             "default_provider": "ollama",
-            "default_model": "qwen3:4b",
-            "options": [{"id": "ollama", "label": "Ollama", "default_model": "qwen3:4b"}],
+            "default_model": "qwen2.5-coder",
+            "options": [{"id": "ollama", "label": "Ollama", "default_model": "qwen2.5-coder"}],
         }
     return data
 
@@ -134,6 +147,31 @@ def progress_html(run: dict, statuses: dict[str, str]) -> str:
     return '<div class="stage-row">' + "".join(cells) + "</div>"
 
 
+def workflow_progress(run: dict, statuses: dict[str, str]) -> tuple[int, str]:
+    if run.get("status") == "completed":
+        return 100, "Completed"
+    if run.get("status") == "failed":
+        return max(STAGE_PROGRESS.get(run.get("current_stage", "requirement"), 5), 5), "Failed"
+    if run.get("status") == "stopped":
+        return max(STAGE_PROGRESS.get(run.get("current_stage", "requirement"), 5), 5), "Stopped"
+
+    completed_agents = sum(1 for status in statuses.values() if status == "completed")
+    agent_bonus = min(completed_agents * 5, 20)
+    stage = run.get("current_stage", "requirement")
+    progress = min(STAGE_PROGRESS.get(stage, 5) + agent_bonus, 99)
+    labels = {
+        "requirement": "Requirement accepted",
+        "backend": "Backend Agent running",
+        "backend_revision": "Backend revision running",
+        "frontend": "Frontend Agent running",
+        "frontend_revision": "Frontend revision running",
+        "testing": "Tester Agent running",
+        "deployment_approval": "Waiting for deployment approval",
+        "deployment": "Deployment Agent running",
+    }
+    return progress, labels.get(stage, "Workflow running")
+
+
 def render_logs(logs: list[dict]) -> None:
     if not logs:
         st.info("No activity yet.")
@@ -144,47 +182,24 @@ def render_logs(logs: list[dict]) -> None:
             "agent": row["agent_name"],
             "action": row["action"],
             "status": row["status"],
-            "summary": row["output_summary"],
+            "summary": display_log_summary(row["output_summary"]),
         }
         for row in reversed(logs[-80:])
     ]
-    st.dataframe(rows, width="stretch", hide_index=True)
+    st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
-def render_agent_action_feed(logs: list[dict]) -> None:
-    if not logs:
-        st.info("Waiting for agents to begin work.")
-        return
-
-    latest = list(reversed(logs[-8:]))
-    for entry in latest:
-        timestamp = format_time(entry.get("timestamp", ""))
-        label = f"{timestamp} — {entry.get('agent_name', 'Unknown Agent')} ({entry.get('status', 'unknown')})"
-        with st.expander(label, expanded=False):
-            st.markdown(f"**Action:** {entry.get('action', 'No action recorded')}")
-            if entry.get("output_summary"):
-                st.markdown(f"**Summary:** {entry['output_summary']}")
-
-
-def compute_progress(detail: dict, statuses: dict[str, str]) -> int:
-    if detail.get("status") in {"success", "completed"}:
-        return 100
-
-    completed_stages = 1
-    completed_stages += 1 if statuses.get("Backend Agent") == "completed" else 0
-    completed_stages += 1 if statuses.get("Frontend Agent") == "completed" else 0
-    completed_stages += 1 if statuses.get("Tester Agent") == "completed" else 0
-    completed_stages += 1 if statuses.get("Deployment Agent") == "completed" else 0
-    return int(100 * completed_stages / len(STAGES))
+def display_log_summary(value: str) -> str:
+    try:
+        payload = json.loads(value)
+        return payload.get("summary", value)
+    except (TypeError, ValueError):
+        return value
 
 
 def format_time(value: str) -> str:
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        local_dt = parsed.astimezone()
-        return local_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%H:%M:%S")
     except ValueError:
         return value
 
@@ -220,16 +235,15 @@ with st.sidebar:
         index=provider_ids.index(default_provider) if default_provider in provider_ids else 0,
         format_func=lambda item: provider_labels.get(item, item),
     )
-    default_model = next((item["default_model"] for item in provider_options if item["id"] == provider), "qwen3:4b")
+    default_model = next((item["default_model"] for item in provider_options if item["id"] == provider), "qwen2.5-coder")
     model = st.text_input("Model", value=default_model)
     st.divider()
     st.header("Local Commands")
-    st.code("ollama pull qwen3:4b\nollama serve\nuvicorn app.main:app --reload\nstreamlit run dashboard/app.py")
+    st.code("ollama pull qwen2.5-coder\nollama serve\nuvicorn app.main:app --reload\nstreamlit run dashboard/app.py")
 
 recent_runs = api_request("GET", "/api/runs", params={"limit": 20}) or []
-if "app_initialized" not in st.session_state:
-    st.session_state.pop("current_run_id", None)
-    st.session_state["app_initialized"] = True
+if "current_run_id" not in st.session_state and recent_runs:
+    st.session_state.current_run_id = recent_runs[0]["id"]
 
 left, right = st.columns([1.05, 0.95])
 with left:
@@ -239,7 +253,7 @@ with left:
         height=180,
         placeholder="Example: Build a small FastAPI task tracker with a Streamlit dashboard and Docker setup.",
     )
-    if st.button("Start Run", type="primary", width="stretch"):
+    if st.button("Start Run", type="primary", use_container_width=True):
         payload = {"requirement": requirement, "provider": provider, "model": model}
         if not requirement.strip():
             st.warning("Enter a software requirement first.")
@@ -253,17 +267,15 @@ with right:
     st.subheader("Recent Runs")
     if recent_runs:
         labels = {run["id"]: f"Run {run['id']} - {run['status']} - {format_time(run['created_at'])}" for run in recent_runs}
-        options = [None] + [run["id"] for run in recent_runs]
         selected = st.selectbox(
             "Open run",
-            options,
+            [run["id"] for run in recent_runs],
             index=0,
-            format_func=lambda run_id: "Select a run" if run_id is None else labels[run_id],
+            format_func=lambda run_id: labels[run_id],
         )
-        if st.button("Open Selected Run", width="stretch"):
-            if selected is not None:
-                st.session_state.current_run_id = selected
-                st.rerun()
+        if st.button("Open Selected Run", use_container_width=True):
+            st.session_state.current_run_id = selected
+            st.rerun()
     else:
         st.info("No runs yet.")
 
@@ -278,16 +290,16 @@ if run_id:
         control_cols = st.columns([1, 1, 1, 2])
         with control_cols[0]:
             if detail["status"] == "waiting_approval":
-                if st.button("Approve Deployment", type="primary", width="stretch"):
+                if st.button("Approve Deployment", type="primary", use_container_width=True):
                     api_request("POST", f"/api/runs/{run_id}/approve-deployment")
                     st.rerun()
         with control_cols[1]:
             if detail["status"] in {"running", "waiting_approval"}:
-                if st.button("Stop Run", width="stretch"):
+                if st.button("Stop Run", use_container_width=True):
                     api_request("POST", f"/api/runs/{run_id}/stop")
                     st.rerun()
         with control_cols[2]:
-            if st.button("Restart Run", width="stretch"):
+            if st.button("Restart Run", use_container_width=True):
                 restarted = api_request("POST", f"/api/runs/{run_id}/restart")
                 if restarted:
                     st.session_state.current_run_id = restarted["id"]
@@ -299,17 +311,8 @@ if run_id:
                 f"**Provider:** `{detail['provider']}` / `{detail['model']}`"
             )
 
-        progress_pct = compute_progress(detail, statuses)
-
-        progress_cols = st.columns([3, 1])
-        with progress_cols[0]:
-            st.subheader("Live run progress")
-            st.progress(progress_pct)
-            st.markdown(f"**{progress_pct}% complete** — Current stage: `{detail['current_stage']}`")
-        with progress_cols[1]:
-            st.metric("Run status", detail["status"])
-            st.metric("Current stage", detail["current_stage"])
-
+        progress_value, progress_label = workflow_progress(detail, statuses)
+        st.progress(progress_value, text=f"{progress_label} - {progress_value}%")
         st.markdown(progress_html(detail, statuses), unsafe_allow_html=True)
 
         agent_cols = st.columns(4)
@@ -317,11 +320,10 @@ if run_id:
             with agent_cols[index]:
                 st.markdown(status_card(agent_name, statuses.get(agent_name, "idle")), unsafe_allow_html=True)
 
-        log_tab, file_tab, message_tab = st.tabs(["Live Activity Log", "Generated Files", "Agent Messages"])
+        log_tab, file_tab, message_tab, memory_tab, eval_tab = st.tabs(
+            ["Live Activity Log", "Generated Files", "Agent Messages", "Memory & Context", "Evaluation"]
+        )
         with log_tab:
-            st.subheader("Agent action feed")
-            render_agent_action_feed(detail["logs"])
-            st.divider()
             render_logs(detail["logs"])
 
         with file_tab:
@@ -343,10 +345,78 @@ if run_id:
             else:
                 st.info("No agent messages yet.")
 
+        with memory_tab:
+            st.markdown("#### Short-Term Memory")
+            if detail.get("short_term_memory"):
+                st.dataframe(
+                    [
+                        {"key": row["key"], "value": row["value"], "updated": format_time(row["updated_at"])}
+                        for row in detail["short_term_memory"]
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info("Short-term memory will appear as agents run.")
+
+            st.markdown("#### Long-Term Memory Retrieved")
+            if detail.get("long_term_memory"):
+                st.dataframe(
+                    [
+                        {
+                            "category": row["category"],
+                            "summary": row["summary"],
+                            "source_run_id": row["source_run_id"],
+                        }
+                        for row in detail["long_term_memory"]
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info("No reusable long-term memory stored yet.")
+
+            st.markdown("#### Context Sent To Agents")
+            contexts = detail.get("contexts") or []
+            if contexts:
+                labels = {
+                    row["id"]: f"{row['agent_name']} - {format_time(row['timestamp'])}"
+                    for row in contexts
+                }
+                selected_context_id = st.selectbox(
+                    "Context snapshot",
+                    [row["id"] for row in contexts],
+                    format_func=lambda context_id: labels[context_id],
+                )
+                selected_context = next(row for row in contexts if row["id"] == selected_context_id)
+                st.code(selected_context["payload_json"], language="json")
+            else:
+                st.info("Context snapshots will appear before each agent call.")
+
+        with eval_tab:
+            evaluations = detail.get("evaluations") or []
+            if evaluations:
+                st.dataframe(
+                    [
+                        {
+                            "time": format_time(row["timestamp"]),
+                            "correctness": row["correctness"],
+                            "completeness": row["completeness"],
+                            "code_quality": row["code_quality"],
+                            "passed": row["passed"],
+                            "summary": row["summary"],
+                        }
+                        for row in evaluations
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info("Evaluation scores appear after the Tester Agent runs.")
+
         if detail.get("error"):
             st.error(detail["error"])
 
         if detail["status"] == "running":
             time.sleep(2)
             st.rerun()
-

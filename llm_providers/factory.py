@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from backend.app.config import get_settings
+from config.defaults import ANTHROPIC_DEFAULT_MODEL, DEFAULT_MODEL, DEFAULT_PROVIDER, OPENAI_DEFAULT_MODEL
 
 
 @dataclass(frozen=True)
@@ -12,14 +13,14 @@ class ProviderOption:
 
 
 PROVIDER_OPTIONS = [
-    ProviderOption("ollama", "Ollama", "qwen3:4b", False),
-    ProviderOption("openai", "OpenAI", "gpt-4o-mini", True),
-    ProviderOption("anthropic", "Claude/Anthropic", "claude-3-5-sonnet-latest", True),
+    ProviderOption(DEFAULT_PROVIDER, "Ollama", DEFAULT_MODEL, False),
+    ProviderOption("openai", "OpenAI", OPENAI_DEFAULT_MODEL, True),
+    ProviderOption("anthropic", "Claude/Anthropic", ANTHROPIC_DEFAULT_MODEL, True),
 ]
 
 
 def normalize_provider(provider: str | None) -> str:
-    cleaned = (provider or "ollama").strip().lower()
+    cleaned = (provider or DEFAULT_PROVIDER).strip().lower()
     aliases = {
         "claude": "anthropic",
         "anthropic": "anthropic",
@@ -43,14 +44,20 @@ def normalize_model_name(provider: str, model: str | None) -> str:
     return selected
 
 
-def build_llm_client(provider: str | None = None, model: str | None = None):
-    from llm_providers.litellm_client import LiteLLMClient
+def build_chat_provider(provider: str | None = None, model: str | None = None):
+    from llm_providers.langchain_client import LangChainChatProvider
 
     settings = get_settings()
     normalized_provider = normalize_provider(provider or settings.llm_provider)
     normalized_model = normalize_model_name(normalized_provider, model or settings.llm_model)
     api_base = settings.ollama_base_url if normalized_provider == "ollama" else None
-    return LiteLLMClient(provider=normalized_provider, model=normalized_model, api_base=api_base)
+    return LangChainChatProvider(provider=normalized_provider, model=normalized_model, api_base=api_base)
+
+
+def build_chat_model(provider: str | None = None, model: str | None = None):
+    chat_provider = build_chat_provider(provider, model)
+    chat_provider.validate()
+    return chat_provider.chat_model
 
 
 def provider_options() -> list[dict[str, str | bool]]:
