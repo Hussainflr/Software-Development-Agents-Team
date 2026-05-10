@@ -11,6 +11,17 @@ class RunCreate(BaseModel):
     model: str = DEFAULT_MODEL
 
 
+class RequirementValidationRequest(BaseModel):
+    requirement: str = ""
+
+
+class RequirementValidationResponse(BaseModel):
+    allowed: bool
+    category: str
+    reason: str
+    guidance: str
+
+
 class RunResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -123,6 +134,7 @@ class ProviderOptionResponse(BaseModel):
     label: str
     default_model: str
     requires_api_key: bool
+    api_key_configured: bool = False
 
 
 class ModelRecommendationResponse(BaseModel):
@@ -136,6 +148,8 @@ class ProvidersResponse(BaseModel):
     default_provider: str
     default_model: str
     options: list[ProviderOptionResponse]
+    openai_configured: bool = False
+    anthropic_configured: bool = False
     ollama_running: bool = False
     ollama_models: list[str] = Field(default_factory=list)
     detected_model: str | None = None

@@ -3,7 +3,15 @@ from textwrap import dedent
 from agents.schemas import AgentOutput
 
 
+def is_rock_paper_scissors_requirement(requirement: str) -> bool:
+    normalized = requirement.lower()
+    return "rock" in normalized and "paper" in normalized and "scissors" in normalized
+
+
 def backend_fallback(requirement: str, raw_response: str) -> AgentOutput:
+    if is_rock_paper_scissors_requirement(requirement):
+        return rock_paper_scissors_backend_fallback(requirement, raw_response)
+
     cleaned_requirement = requirement.replace('"""', "'").strip()
     main_py = dedent(
         f'''
@@ -90,7 +98,10 @@ def backend_fallback(requirement: str, raw_response: str) -> AgentOutput:
     )
 
 
-def frontend_fallback(raw_response: str) -> AgentOutput:
+def frontend_fallback(requirement: str, raw_response: str) -> AgentOutput:
+    if is_rock_paper_scissors_requirement(requirement):
+        return rock_paper_scissors_frontend_fallback(raw_response)
+
     app_py = dedent(
         '''
         import os
@@ -124,7 +135,7 @@ def frontend_fallback(raw_response: str) -> AgentOutput:
             health = requests.get(f"{API_URL}/health", timeout=5).json()
             st.info(f"Backend status: {health.get('status', 'unknown')}")
             tasks = requests.get(f"{API_URL}/tasks", timeout=5).json()
-            st.dataframe(tasks, use_container_width=True)
+            st.dataframe(tasks, width="stretch")
         except requests.RequestException as exc:
             st.error(f"Could not reach generated backend at {API_URL}: {exc}")
         '''
@@ -150,7 +161,10 @@ def frontend_fallback(raw_response: str) -> AgentOutput:
     )
 
 
-def tester_fallback(raw_response: str) -> AgentOutput:
+def tester_fallback(requirement: str, raw_response: str) -> AgentOutput:
+    if is_rock_paper_scissors_requirement(requirement):
+        return rock_paper_scissors_tester_fallback(raw_response)
+
     test_py = dedent(
         '''
         from fastapi.testclient import TestClient
@@ -207,6 +221,211 @@ def tester_fallback(raw_response: str) -> AgentOutput:
             "generated_tests/TEST_REPORT.md": report,
         },
         notes=["Tests assume generated artifacts are copied into the same Python path."],
+    )
+
+
+def rock_paper_scissors_backend_fallback(requirement: str, raw_response: str) -> AgentOutput:
+    cleaned_requirement = requirement.replace('"""', "'").strip()
+    main_py = dedent(
+        f'''
+        import random
+
+        from fastapi import FastAPI
+        from pydantic import BaseModel, field_validator
+
+
+        MOVES = ("rock", "paper", "scissors")
+
+        app = FastAPI(title="Rock Paper Scissors API")
+
+        REQUIREMENT = """{cleaned_requirement}"""
+
+
+        class PlayRequest(BaseModel):
+            move: str
+
+            @field_validator("move")
+            @classmethod
+            def validate_move(cls, value: str) -> str:
+                normalized = value.lower().strip()
+                if normalized not in MOVES:
+                    raise ValueError("move must be one of: rock, paper, scissors")
+                return normalized
+
+
+        def determine_winner(player_move: str, computer_move: str) -> str:
+            if player_move == computer_move:
+                return "tie"
+            winning_pairs = {{
+                "rock": "scissors",
+                "paper": "rock",
+                "scissors": "paper",
+            }}
+            return "player" if winning_pairs[player_move] == computer_move else "computer"
+
+
+        @app.get("/health")
+        def health() -> dict:
+            return {{"status": "ok", "game": "rock-paper-scissors"}}
+
+
+        @app.post("/play")
+        def play_round(payload: PlayRequest) -> dict:
+            computer_move = random.choice(MOVES)
+            winner = determine_winner(payload.move, computer_move)
+            return {{
+                "winner": winner,
+                "player_move": payload.move,
+                "computer_move": computer_move,
+            }}
+        '''
+    ).strip()
+    readme = dedent(
+        f"""
+        # Rock Paper Scissors Backend
+
+        Requirement:
+        {cleaned_requirement}
+
+        API surface:
+        - `GET /health`
+        - `POST /play` with JSON body `{{"move": "rock"}}`
+
+        This fallback artifact was produced after the LLM returned invalid structured output.
+
+        Raw model summary:
+        {raw_response[:1200]}
+        """
+    ).strip()
+    return AgentOutput(
+        summary="Created a FastAPI Rock Paper Scissors backend with health and play APIs.",
+        artifacts={
+            "generated_backend/main.py": main_py,
+            "generated_backend/README.md": readme,
+        },
+        notes=["Fallback backend uses random computer moves for each round."],
+    )
+
+
+def rock_paper_scissors_frontend_fallback(raw_response: str) -> AgentOutput:
+    app_py = dedent(
+        '''
+        import os
+
+        import requests
+        import streamlit as st
+
+
+        API_URL = os.getenv("GENERATED_API_URL", "http://localhost:9000")
+        MOVES = ("rock", "paper", "scissors")
+
+        st.set_page_config(page_title="Rock Paper Scissors", layout="wide")
+        st.title("Rock Paper Scissors")
+        st.caption("Choose a move and play one round against the backend.")
+
+        selected_move = st.radio("Your move", MOVES, horizontal=True)
+
+        if st.button("Play Round", type="primary", width="stretch"):
+            try:
+                response = requests.post(
+                    f"{API_URL}/play",
+                    json={"move": selected_move},
+                    timeout=10,
+                )
+                response.raise_for_status()
+                result = response.json()
+                st.success(f"Winner: {result['winner']}")
+                st.write(
+                    {
+                        "player_move": result["player_move"],
+                        "computer_move": result["computer_move"],
+                    }
+                )
+            except requests.RequestException as exc:
+                st.error(f"Could not play round against {API_URL}: {exc}")
+
+        try:
+            health = requests.get(f"{API_URL}/health", timeout=5).json()
+            st.info(f"Backend status: {health.get('status', 'unknown')}")
+        except requests.RequestException:
+            st.warning(f"Backend is not reachable at {API_URL}.")
+        '''
+    ).strip()
+    readme = dedent(
+        f"""
+        # Rock Paper Scissors Frontend
+
+        Streamlit UI for playing Rock Paper Scissors through `POST /play`.
+        Configure the backend URL with `GENERATED_API_URL`.
+
+        Raw model summary:
+        {raw_response[:1200]}
+        """
+    ).strip()
+    return AgentOutput(
+        summary="Created a Streamlit Rock Paper Scissors UI connected to the backend play API.",
+        artifacts={
+            "generated_frontend/app.py": app_py,
+            "generated_frontend/README.md": readme,
+        },
+        notes=["Set GENERATED_API_URL if the generated backend runs on a different port."],
+    )
+
+
+def rock_paper_scissors_tester_fallback(raw_response: str) -> AgentOutput:
+    test_py = dedent(
+        '''
+        from fastapi.testclient import TestClient
+
+        from generated_backend.main import app
+
+
+        client = TestClient(app)
+
+
+        def test_health_endpoint():
+            response = client.get("/health")
+            assert response.status_code == 200
+            assert response.json()["status"] == "ok"
+
+
+        def test_play_round_accepts_valid_move():
+            response = client.post("/play", json={"move": "rock"})
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["player_move"] == "rock"
+            assert payload["computer_move"] in {"rock", "paper", "scissors"}
+            assert payload["winner"] in {"player", "computer", "tie"}
+
+
+        def test_play_round_rejects_invalid_move():
+            response = client.post("/play", json={"move": "lizard"})
+            assert response.status_code == 422
+        '''
+    ).strip()
+    report = dedent(
+        f"""
+        # Test Report
+
+        Result: pass-ready for local demo.
+
+        Coverage:
+        - Health check endpoint
+        - Rock Paper Scissors play endpoint
+        - Valid move response shape
+        - Invalid move validation
+
+        Raw model summary:
+        {raw_response[:1200]}
+        """
+    ).strip()
+    return AgentOutput(
+        summary="Prepared pytest coverage for the generated Rock Paper Scissors backend.",
+        artifacts={
+            "generated_tests/test_generated_backend.py": test_py,
+            "generated_tests/TEST_REPORT.md": report,
+        },
+        notes=["Tests assume generated artifacts are importable on the Python path."],
     )
 
 

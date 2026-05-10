@@ -73,6 +73,12 @@ Long-term memory stores reusable summaries from successful runs, such as useful 
 
 Mission Control has a `Memory & Context` tab that shows both memory layers and the exact context sent to each agent.
 
+## Requirement Guardrails
+
+Before a run starts, Mission Control validates that the manager input is an actionable software development requirement. Short chat messages like `hello`, vague fragments, and non-software requests are blocked before the LLM provider or LangGraph workflow is called.
+
+The dashboard and API both use `guardrails/requirements.py`, so direct API calls follow the same rule as the UI. Valid requests should name the software artifact and intent, for example: `Build a FastAPI task tracker with a Streamlit dashboard, SQLite storage, tests, and Docker setup.`
+
 ## Evaluation
 
 The evaluation layer uses a hybrid approach:

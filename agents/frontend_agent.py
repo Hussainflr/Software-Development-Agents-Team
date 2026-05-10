@@ -10,4 +10,4 @@ class FrontendAgent(BaseAgent):
     skill_names = ["code_generation"]
 
     def fallback_output(self, agent_input: AgentInput, raw_response: str) -> AgentOutput:
-        return frontend_fallback(raw_response)
+        return frontend_fallback(agent_input.requirement, raw_response)

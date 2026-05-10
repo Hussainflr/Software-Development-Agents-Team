@@ -8,12 +8,13 @@ class DeterministicEvaluator:
 
     pass_threshold = 7
 
-    def score(self, artifacts: dict[str, str], bugs: list[str]) -> ChecklistResult:
+    def score(self, artifacts: dict[str, str], bugs: list[str], requirement: str = "") -> ChecklistResult:
         backend = artifacts.get("generated_backend/main.py", "")
         frontend = artifacts.get("generated_frontend/app.py", "")
         tests = "\n\n".join(
             content for path, content in artifacts.items() if path.startswith("generated_tests/") and path.endswith(".py")
         )
+        requirement_checks = self._requirement_alignment_checks(requirement, backend, frontend, tests)
 
         correctness_checks = {
             "backend FastAPI app exists": bool(backend and "FastAPI" in backend),
@@ -21,6 +22,7 @@ class DeterministicEvaluator:
             "backend has health endpoint": "/health" in backend,
             "frontend Streamlit app exists": bool(frontend and ("streamlit" in frontend.lower() or "st." in frontend)),
             "tests contain assertions": bool(tests and "assert " in tests),
+            **requirement_checks,
         }
         completeness_checks = {
             "backend main artifact present": "generated_backend/main.py" in artifacts,
@@ -108,3 +110,23 @@ class DeterministicEvaluator:
         combined = "\n".join(artifacts.values()).lower()
         return any(marker in combined for marker in markers)
 
+    @staticmethod
+    def _requirement_alignment_checks(
+        requirement: str,
+        backend: str,
+        frontend: str,
+        tests: str,
+    ) -> dict[str, bool]:
+        normalized_requirement = requirement.lower()
+        if not all(term in normalized_requirement for term in ("rock", "paper", "scissors")):
+            return {}
+
+        backend_lower = backend.lower()
+        frontend_lower = frontend.lower()
+        tests_lower = tests.lower()
+        return {
+            "rock paper scissors backend play endpoint": "/play" in backend_lower,
+            "rock paper scissors frontend controls": all(move in frontend_lower for move in ("rock", "paper", "scissors")),
+            "rock paper scissors frontend calls play API": "/play" in frontend_lower,
+            "rock paper scissors tests cover play API": "/play" in tests_lower,
+        }

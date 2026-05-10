@@ -1,4 +1,3 @@
-import os
 from typing import Any
 
 import httpx
@@ -55,19 +54,30 @@ class LangChainChatProvider:
         if self.provider == "openai":
             from langchain_openai import ChatOpenAI
 
-            return ChatOpenAI(model=self.model.removeprefix("openai/"), temperature=0.2)
+            settings = get_settings()
+            return ChatOpenAI(
+                model=self.model.removeprefix("openai/"),
+                temperature=0.2,
+                api_key=settings.openai_api_key or None,
+            )
         if self.provider == "anthropic":
             from langchain_anthropic import ChatAnthropic
 
-            return ChatAnthropic(model=self.model.removeprefix("anthropic/"), temperature=0.2)
+            settings = get_settings()
+            return ChatAnthropic(
+                model=self.model.removeprefix("anthropic/"),
+                temperature=0.2,
+                api_key=settings.anthropic_api_key or None,
+            )
         raise ProviderConfigurationError(f"Unsupported provider: {self.provider}")
 
     def _validate_provider_ready(self) -> None:
+        settings = get_settings()
         if self.provider == "ollama":
             self._check_ollama()
-        elif self.provider == "openai" and not os.getenv("OPENAI_API_KEY"):
+        elif self.provider == "openai" and not self._has_configured_secret(settings.openai_api_key):
             raise ProviderConfigurationError("OPENAI_API_KEY is required when provider is OpenAI.")
-        elif self.provider == "anthropic" and not os.getenv("ANTHROPIC_API_KEY"):
+        elif self.provider == "anthropic" and not self._has_configured_secret(settings.anthropic_api_key):
             raise ProviderConfigurationError("ANTHROPIC_API_KEY is required when provider is Claude/Anthropic.")
 
     def _check_ollama(self) -> None:
@@ -89,3 +99,7 @@ class LangChainChatProvider:
         if ":" not in selected_model and f"{selected_model}:latest" in installed_models:
             return True
         return False
+
+    @staticmethod
+    def _has_configured_secret(value: str | None) -> bool:
+        return bool(value and value.strip())

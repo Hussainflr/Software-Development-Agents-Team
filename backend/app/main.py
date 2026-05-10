@@ -11,14 +11,19 @@ from backend.app.schemas import (
     EvaluationResponse,
     GeneratedFileResponse,
     ProvidersResponse,
+    RequirementValidationRequest,
+    RequirementValidationResponse,
     RunCreate,
     RunDetailResponse,
     RunResponse,
 )
 from database.repository import Repository
 from database.session import init_db
+from guardrails import validate_requirement
 from llm_providers.base import ProviderConnectionError, ProviderModelNotFoundError
 from llm_providers.factory import (
+    api_key_configured,
+    cloud_provider_status,
     model_recommendations,
     normalize_provider,
     ollama_discovery_status,
@@ -47,6 +52,7 @@ app.add_middleware(
 def on_startup() -> None:
     init_db()
     settings.generated_root.mkdir(parents=True, exist_ok=True)
+    repository.interrupt_active_runs()
 
 
 def launch_background(target, run_id: int) -> None:
@@ -87,16 +93,35 @@ def providers() -> ProvidersResponse:
         suggested_provider=suggested_provider,
         suggested_model=suggested_model,
         model_recommendations=model_recommendations(discovery),
+        **cloud_provider_status(),
         **discovery,
     )
 
 
+@app.post("/api/requirements/validate", response_model=RequirementValidationResponse)
+def validate_manager_requirement(payload: RequirementValidationRequest) -> RequirementValidationResponse:
+    return RequirementValidationResponse(**validate_requirement(payload.requirement).model_dump())
+
+
 @app.post("/api/runs", response_model=RunResponse, status_code=status.HTTP_201_CREATED)
 def create_run(payload: RunCreate) -> RunResponse:
+    requirement_validation = validate_requirement(payload.requirement)
+    if not requirement_validation.allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=requirement_validation.model_dump(),
+        )
+
     try:
         provider = normalize_provider(payload.provider)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if provider in {"openai", "anthropic"} and not api_key_configured(provider):
+        key_name = "OPENAI_API_KEY" if provider == "openai" else "ANTHROPIC_API_KEY"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{key_name} is not configured. Add it to .env or your shell environment and restart the API.",
+        )
     try:
         model = resolve_model(provider, payload.model)
     except ProviderConnectionError as exc:

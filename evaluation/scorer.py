@@ -25,7 +25,7 @@ class EvaluationScorer:
         requirement: str = "",
         llm_judge: Any | None = None,
     ) -> EvaluationScore:
-        deterministic = self.deterministic.score(artifacts, bugs)
+        deterministic = self.deterministic.score(artifacts, bugs, requirement=requirement)
         llm_result: LLMJudgeResult | None = None
         llm_error = ""
 
@@ -76,4 +76,3 @@ class EvaluationScorer:
             f"LLM judge: {llm_result.summary}. "
             f"Deterministic failed checks: {failed}. LLM findings: {findings}."
         )
-

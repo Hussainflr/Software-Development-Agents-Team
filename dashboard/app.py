@@ -95,7 +95,17 @@ def get_providers() -> dict:
         return {
             "default_provider": "ollama",
             "default_model": "qwen2.5-coder",
-            "options": [{"id": "ollama", "label": "Ollama", "default_model": "qwen2.5-coder"}],
+            "options": [
+                {
+                    "id": "ollama",
+                    "label": "Ollama",
+                    "default_model": "qwen2.5-coder",
+                    "requires_api_key": False,
+                    "api_key_configured": False,
+                }
+            ],
+            "openai_configured": False,
+            "anthropic_configured": False,
             "ollama_running": False,
             "ollama_models": [],
             "detected_model": None,
@@ -105,6 +115,18 @@ def get_providers() -> dict:
             "message": "Mission Control API is unavailable.",
         }
     return data
+
+
+def validate_requirement_with_api(requirement: str) -> dict:
+    data = api_request("POST", "/api/requirements/validate", json={"requirement": requirement})
+    if data:
+        return data
+    return {
+        "allowed": False,
+        "category": "api_unavailable",
+        "reason": "Could not validate the requirement because the Mission Control API is unavailable.",
+        "guidance": "Start FastAPI with `uvicorn app.main:app --reload`, then try again.",
+    }
 
 
 def unique_models(models: list[str]) -> list[str]:
@@ -203,7 +225,7 @@ def render_logs(logs: list[dict]) -> None:
         }
         for row in reversed(logs[-80:])
     ]
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.dataframe(rows, width="stretch", hide_index=True)
 
 
 def display_log_summary(value: str) -> str:
@@ -256,7 +278,10 @@ with st.sidebar:
         index=provider_ids.index(default_provider) if default_provider in provider_ids else 0,
         format_func=lambda item: provider_labels.get(item, item),
     )
-    default_model = next((item["default_model"] for item in provider_options if item["id"] == provider), "qwen2.5-coder")
+    selected_provider_option = next((item for item in provider_options if item["id"] == provider), {})
+    provider_needs_key = bool(selected_provider_option.get("requires_api_key"))
+    provider_has_key = bool(selected_provider_option.get("api_key_configured"))
+    default_model = selected_provider_option.get("default_model", "qwen2.5-coder")
     if provider == "ollama":
         if ollama_running and ollama_models:
             model_options = unique_models([detected_ollama_model, *ollama_models, "auto"])
@@ -277,6 +302,11 @@ with st.sidebar:
             st.code("ollama serve\nollama pull qwen2.5-coder")
     else:
         model = st.text_input("Model", value=default_model)
+        if provider_has_key:
+            st.success(f"{provider_labels.get(provider, provider)} API key detected from environment.")
+        elif provider_needs_key:
+            key_name = "OPENAI_API_KEY" if provider == "openai" else "ANTHROPIC_API_KEY"
+            st.warning(f"{key_name} is not configured in `.env` or your shell environment.")
     if model_recommendations:
         st.caption("Recommended models")
         for recommendation in model_recommendations[:3]:
@@ -288,9 +318,10 @@ with st.sidebar:
     st.header("Local Commands")
     st.code("ollama serve\nollama pull qwen2.5-coder\nuvicorn app.main:app --reload\nstreamlit run dashboard/app.py")
 
+if "current_run_id" not in st.session_state:
+    st.session_state.current_run_id = None
+
 recent_runs = api_request("GET", "/api/runs", params={"limit": 20}) or []
-if "current_run_id" not in st.session_state and recent_runs:
-    st.session_state.current_run_id = recent_runs[0]["id"]
 
 left, right = st.columns([1.05, 0.95])
 with left:
@@ -300,13 +331,16 @@ with left:
         height=180,
         placeholder="Example: Build a small FastAPI task tracker with a Streamlit dashboard and Docker setup.",
     )
-    start_disabled = provider == "ollama" and not ollama_running
-    if start_disabled:
+    start_disabled = (provider == "ollama" and not ollama_running) or (provider_needs_key and not provider_has_key)
+    if provider == "ollama" and not ollama_running:
         st.info("Start Ollama and refresh; Mission Control will detect the local model automatically.")
-    if st.button("Start Run", type="primary", use_container_width=True, disabled=start_disabled):
+    elif provider_needs_key and not provider_has_key:
+        st.info("Add the provider API key to `.env` or your shell environment, then restart the API.")
+    if st.button("Start Run", type="primary", width="stretch", disabled=start_disabled):
         payload = {"requirement": requirement, "provider": provider, "model": model}
-        if not requirement.strip():
-            st.warning("Enter a software requirement first.")
+        requirement_validation = validate_requirement_with_api(requirement)
+        if not requirement_validation["allowed"]:
+            st.warning(f"{requirement_validation['reason']} {requirement_validation['guidance']}")
         else:
             created = api_request("POST", "/api/runs", json=payload)
             if created:
@@ -316,14 +350,17 @@ with left:
 with right:
     st.subheader("Recent Runs")
     if recent_runs:
+        run_ids = [run["id"] for run in recent_runs]
+        current_run_id = st.session_state.get("current_run_id")
+        selected_index = run_ids.index(current_run_id) if current_run_id in run_ids else 0
         labels = {run["id"]: f"Run {run['id']} - {run['status']} - {format_time(run['created_at'])}" for run in recent_runs}
         selected = st.selectbox(
             "Open run",
-            [run["id"] for run in recent_runs],
-            index=0,
+            run_ids,
+            index=selected_index,
             format_func=lambda run_id: labels[run_id],
         )
-        if st.button("Open Selected Run", use_container_width=True):
+        if st.button("Open Selected Run", width="stretch"):
             st.session_state.current_run_id = selected
             st.rerun()
     else:
@@ -340,16 +377,16 @@ if run_id:
         control_cols = st.columns([1, 1, 1, 2])
         with control_cols[0]:
             if detail["status"] == "waiting_approval":
-                if st.button("Approve Deployment", type="primary", use_container_width=True):
+                if st.button("Approve Deployment", type="primary", width="stretch"):
                     api_request("POST", f"/api/runs/{run_id}/approve-deployment")
                     st.rerun()
         with control_cols[1]:
             if detail["status"] in {"running", "waiting_approval"}:
-                if st.button("Stop Run", use_container_width=True):
+                if st.button("Stop Run", width="stretch"):
                     api_request("POST", f"/api/runs/{run_id}/stop")
                     st.rerun()
         with control_cols[2]:
-            if st.button("Restart Run", use_container_width=True):
+            if st.button("Restart Run", width="stretch"):
                 restarted = api_request("POST", f"/api/runs/{run_id}/restart")
                 if restarted:
                     st.session_state.current_run_id = restarted["id"]
@@ -403,7 +440,7 @@ if run_id:
                         {"key": row["key"], "value": row["value"], "updated": format_time(row["updated_at"])}
                         for row in detail["short_term_memory"]
                     ],
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
             else:
@@ -420,7 +457,7 @@ if run_id:
                         }
                         for row in detail["long_term_memory"]
                     ],
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
             else:
@@ -458,7 +495,7 @@ if run_id:
                         }
                         for row in evaluations
                     ],
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
             else:

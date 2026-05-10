@@ -11,6 +11,7 @@ Production-style expectations:
 - Validate inputs with Pydantic models.
 - Return useful HTTP errors for missing resources or invalid operations.
 - Keep the code runnable with the project dependencies.
+- Ensure every Python artifact compiles with `python -m py_compile`; top-level code must not have accidental leading indentation.
 - Include comments only where behavior is non-obvious.
 
 Expected artifacts:

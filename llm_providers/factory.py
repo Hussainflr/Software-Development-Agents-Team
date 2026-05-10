@@ -1,4 +1,3 @@
-import os
 from dataclasses import dataclass
 
 from backend.app.config import get_settings
@@ -86,6 +85,27 @@ def get_ollama_models() -> list[str]:
 
     settings = get_settings()
     return list_ollama_models(settings.ollama_base_url)
+
+
+def has_configured_secret(value: str | None) -> bool:
+    return bool(value and value.strip())
+
+
+def api_key_configured(provider: str | None) -> bool:
+    settings = get_settings()
+    normalized_provider = normalize_provider(provider)
+    if normalized_provider == "openai":
+        return has_configured_secret(settings.openai_api_key)
+    if normalized_provider == "anthropic":
+        return has_configured_secret(settings.anthropic_api_key)
+    return False
+
+
+def cloud_provider_status() -> dict[str, bool]:
+    return {
+        "openai_configured": api_key_configured("openai"),
+        "anthropic_configured": api_key_configured("anthropic"),
+    }
 
 
 def resolve_model(provider: str, model: str | None) -> str:
@@ -199,8 +219,10 @@ def suggested_provider_model(discovery: dict[str, str | bool | list[str] | None]
     detected_model = discovery.get("detected_model")
     if isinstance(detected_model, str) and detected_model:
         return "ollama", detected_model
-    if os.getenv("OPENAI_API_KEY"):
+    if api_key_configured("openai"):
         return "openai", OPENAI_DEFAULT_MODEL
+    if api_key_configured("anthropic"):
+        return "anthropic", ANTHROPIC_DEFAULT_MODEL
     return "ollama", "auto"
 
 
@@ -224,4 +246,12 @@ def build_chat_model(provider: str | None = None, model: str | None = None):
 
 
 def provider_options() -> list[dict[str, str | bool]]:
-    return [option.__dict__ for option in PROVIDER_OPTIONS]
+    options: list[dict[str, str | bool]] = []
+    for option in PROVIDER_OPTIONS:
+        options.append(
+            {
+                **option.__dict__,
+                "api_key_configured": api_key_configured(option.id) if option.requires_api_key else False,
+            }
+        )
+    return options

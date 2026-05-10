@@ -9,6 +9,7 @@ from langchain_core.runnables import RunnableLambda
 from agents.schemas import AgentInput, AgentOutput
 from prompts.loader import load_prompt
 from skills.registry import render_skill_registry
+from tools.artifact_sanitizer import ArtifactValidationError, normalize_agent_output
 
 
 class BaseAgent(ABC):
@@ -29,11 +30,16 @@ class BaseAgent(ABC):
         try:
             result = parse_agent_output(raw_response)
         except ValueError:
-            return self.fallback_output(agent_input, raw_response)
+            return normalize_agent_output(self.fallback_output(agent_input, raw_response))
 
         if not result.artifacts:
-            return self.fallback_output(agent_input, "LangChain parser returned no artifacts.")
-        return result
+            return normalize_agent_output(self.fallback_output(agent_input, "LangChain parser returned no artifacts."))
+
+        try:
+            return normalize_agent_output(result)
+        except ArtifactValidationError as exc:
+            fallback_reason = f"{raw_response}\n\nArtifact validation failed: {exc}"
+            return normalize_agent_output(self.fallback_output(agent_input, fallback_reason))
 
     def as_runnable(self, chat_model: Any):
         parser = PydanticOutputParser(pydantic_object=AgentOutput)

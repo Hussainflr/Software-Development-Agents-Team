@@ -82,3 +82,14 @@ def test_llm_judge_failure_falls_back_to_deterministic_score():
 
     assert score.passed is True
     assert "LLM judge unavailable" in score.summary
+
+
+def test_deterministic_evaluation_catches_rock_paper_scissors_mismatch():
+    score = EvaluationScorer().score(
+        COMPLETE_ARTIFACTS,
+        bugs=[],
+        requirement="Build a Rock Paper Scissors game with /play and a Streamlit UI.",
+    )
+
+    assert score.passed is False
+    assert "rock paper scissors" in score.summary.lower()

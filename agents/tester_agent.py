@@ -10,4 +10,4 @@ class TesterAgent(BaseAgent):
     skill_names = ["test_generation", "code_review"]
 
     def fallback_output(self, agent_input: AgentInput, raw_response: str) -> AgentOutput:
-        return tester_fallback(raw_response)
+        return tester_fallback(agent_input.requirement, raw_response)

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from tools.artifact_sanitizer import normalize_artifact
+
 
 class UnsafeArtifactPath(ValueError):
     """Raised when an agent tries to write outside the generated run folder."""
@@ -21,7 +23,7 @@ def write_artifacts(base_dir: Path, artifacts: dict[str, str]) -> list[Path]:
     for relative_path, content in artifacts.items():
         target = safe_artifact_path(base_dir, relative_path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        target.write_text(normalize_artifact(relative_path, content), encoding="utf-8")
         if target.suffix == ".sh":
             target.chmod(0o755)
         written.append(target)

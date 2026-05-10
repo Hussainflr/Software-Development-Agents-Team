@@ -300,6 +300,18 @@ class SoftwareTeamWorkflow:
                 status="warning",
             )
             return "revise"
+        if needs_revision:
+            run_id = int(state["run_id"])
+            message = "Evaluation failed after the available revision pass. Deployment approval is blocked."
+            self.repository.update_run(run_id, status="failed", current_stage="testing", error=message)
+            self.repository.add_log(
+                run_id,
+                "Evaluation",
+                "Deployment blocked",
+                message,
+                status="error",
+            )
+            return "end"
         if state.get("evaluation_passed"):
             self.long_term_memory.remember(
                 "successful_solution",

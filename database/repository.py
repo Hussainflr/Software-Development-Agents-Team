@@ -57,6 +57,53 @@ class Repository:
             statement = select(Run).order_by(Run.created_at.desc()).limit(limit)
             return list(session.scalars(statement))
 
+    def interrupt_active_runs(self) -> int:
+        """Mark runs left active by a previous API process as stopped.
+
+        Background agent threads are process-local, so a server restart cannot
+        safely resume an old ``running`` row without launching duplicate work.
+        """
+        with self.session_factory() as session:
+            runs = list(session.scalars(select(Run).where(Run.status == "running")))
+            for run in runs:
+                run.status = "stopped"
+                run.current_stage = "stopped"
+                run.stop_requested = True
+                run.error = "Run was interrupted because Mission Control restarted. Use Restart Run to launch it again."
+                run.updated_at = now_utc()
+                session.add(
+                    AgentLog(
+                        run_id=run.id,
+                        agent_name="Mission Control",
+                        action="Run interrupted",
+                        status="warning",
+                        output_summary=json.dumps(
+                            {
+                                "agent": "Mission Control",
+                                "action": "Run interrupted",
+                                "status": "warning",
+                                "summary": run.error,
+                            }
+                        ),
+                    )
+                )
+
+            if runs:
+                active_statuses = list(
+                    session.scalars(
+                        select(AgentStatus).where(
+                            AgentStatus.run_id.in_([run.id for run in runs]),
+                            AgentStatus.status.in_(("thinking", "working")),
+                        )
+                    )
+                )
+                for status_row in active_statuses:
+                    status_row.status = "failed"
+                    status_row.updated_at = now_utc()
+
+            session.commit()
+            return len(runs)
+
     def update_run(self, run_id: int, **fields) -> Run | None:
         with self.session_factory() as session:
             run = session.get(Run, run_id)
