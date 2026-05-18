@@ -11,5 +11,3 @@ agent_team.db
 generated_projects/*
 !generated_projects/.gitkeep
 .DS_Store
-
-diagrams/

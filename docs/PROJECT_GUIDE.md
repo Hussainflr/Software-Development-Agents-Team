@@ -8,6 +8,8 @@ You enter a software requirement, choose an LLM provider/model, and start a run.
 
 The system stores every run in SQLite, including logs, generated files, agent messages, context snapshots, memory, and evaluation scores.
 
+The project is now evolving into an Agentic OS: a local-first platform with a reusable control loop, expanded agent catalog, tool registry, MCP-compatible tool descriptors, dynamic prompt assembly, guardrails, observability, memory, and evaluation loops.
+
 ## How A Run Works
 
 ```text
@@ -18,6 +20,10 @@ Mission Control Dashboard
      |
      v
 Requirement Guardrail
+     |
+     v
+Agentic OS Control Loop
+sense -> plan -> act -> evaluate -> refine/retry -> finalize
      |
      v
 Backend Agent -> Frontend Agent -> Tester Agent
@@ -161,6 +167,7 @@ On a fresh dashboard load, no previous run is auto-opened. You can select a run 
 ```text
 GET  /health
 GET  /api/providers
+GET  /api/os/capabilities
 POST /api/requirements/validate
 POST /api/runs
 GET  /api/runs
@@ -178,7 +185,7 @@ POST /api/runs/{run_id}/restart
 ```text
 .
 ├── agents/              LangChain-based agent definitions
-├── app/                 Uvicorn compatibility entrypoint
+├── app/                 Uvicorn entrypoint and Agentic OS core contracts
 ├── backend/app/         FastAPI API server
 ├── config/              Shared defaults
 ├── context/             Focused context builder
@@ -191,13 +198,27 @@ POST /api/runs/{run_id}/restart
 ├── guardrails/          Manager input validation
 ├── llm_providers/       Provider/model abstraction
 ├── memory/              Short-term and long-term memory
+├── observability/       Structured trace helpers
 ├── prompts/             Agent prompt templates
 ├── samples/             Demo prompts
 ├── scripts/             Local helper scripts
 ├── skills/              Markdown skills and fallback artifacts
 ├── tests/               Unit tests
-├── tools/               Artifact sanitizer and file writer
+├── tools/               Artifact sanitizer, file writer, tool registry, MCP descriptors
 └── workflows/           LangGraph orchestration
+```
+
+## Agentic OS Modules
+
+```text
+app/core/control_loop.py      reusable execution phases and retry/refinement policy
+app/core/agentic_os.py        capability facade for API and dashboard
+agents/catalog.py             full future agent catalog
+tools/registry.py             permissioned local tool registry
+tools/mcp.py                  MCP-compatible manifest/descriptors
+llm_providers/catalog.py      model provider capability metadata
+prompts/assembler.py          dynamic prompt composition
+observability/tracing.py      structured trace events persisted through logs
 ```
 
 ## How Agents Communicate
@@ -210,6 +231,8 @@ Agents communicate through LangGraph state and persisted records:
 - Evaluation records pass/fail scores.
 - If needed, the workflow sends feedback into one revision pass.
 - Deployment Agent runs only after evaluation passes and the human manager approves.
+
+The Agentic OS control-loop snapshot also tracks phase, current agent, retry/refinement counters, and metadata so future dashboard views can show graph state and repair loops directly.
 
 Persistence includes:
 

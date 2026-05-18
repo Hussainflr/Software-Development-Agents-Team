@@ -11,6 +11,8 @@ Agents:
 
 Default stack: Ollama, FastAPI, Streamlit, LangChain, LangGraph, and SQLite.
 
+The project is now being refactored toward an Agentic OS: a local-first platform for multi-agent orchestration, skills, tools, memory, guardrails, evaluation, observability, and MCP-compatible integrations.
+
 ## Quick Start
 
 Create the environment:
@@ -84,6 +86,12 @@ Requirement -> Backend -> Frontend -> Testing -> Human Approval -> Deployment
 
 Mission Control validates your requirement before starting. If testing or evaluation fails, the workflow gets one revision pass. If evaluation still fails, deployment approval is blocked.
 
+The workflow now records Agentic OS control-loop phases:
+
+```text
+sense -> plan -> act -> evaluate -> refine -> retry -> finalize
+```
+
 Generated files are written to:
 
 ```text
@@ -123,8 +131,8 @@ docker compose exec ollama ollama pull qwen2.5-coder
 ## More Documentation
 
 - [Project guide](docs/PROJECT_GUIDE.md)
+- [Agentic OS architecture](docs/AGENTIC_OS_ARCHITECTURE.md)
 - [File-by-file project info](diagrams/PROJECTINFO.md)
 - [System flow](diagrams/SystemFlow.md)
 - [Database and memory architecture](diagrams/DatabaseMemoryArchitecture.md)
 - [LLM provider flow](diagrams/LLMProviderFlow.md)
-
