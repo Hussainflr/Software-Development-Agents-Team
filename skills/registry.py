@@ -16,9 +16,41 @@ class SkillDefinition:
 
 
 SKILLS = {
+    "planning": SkillDefinition(
+        name="planning",
+        file_name="planning.md",
+    ),
     "code_generation": SkillDefinition(
         name="code_generation",
         file_name="code_generation.md",
+    ),
+    "debugging": SkillDefinition(
+        name="debugging",
+        file_name="debugging.md",
+    ),
+    "testing": SkillDefinition(
+        name="testing",
+        file_name="testing.md",
+    ),
+    "evaluation": SkillDefinition(
+        name="evaluation",
+        file_name="evaluation.md",
+    ),
+    "deployment": SkillDefinition(
+        name="deployment",
+        file_name="deployment.md",
+    ),
+    "rag": SkillDefinition(
+        name="rag",
+        file_name="rag.md",
+    ),
+    "research": SkillDefinition(
+        name="research",
+        file_name="research.md",
+    ),
+    "security_review": SkillDefinition(
+        name="security_review",
+        file_name="security_review.md",
     ),
     "test_generation": SkillDefinition(
         name="test_generation",

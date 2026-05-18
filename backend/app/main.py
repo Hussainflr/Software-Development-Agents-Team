@@ -3,6 +3,7 @@ import threading
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.agentic_os import AgenticOSRuntime
 from backend.app.config import get_settings
 from backend.app.schemas import (
     ActionResponse,
@@ -37,6 +38,7 @@ from workflows.software_team_graph import SoftwareTeamWorkflow
 settings = get_settings()
 repository = Repository()
 workflow = SoftwareTeamWorkflow(repository=repository)
+agentic_os = AgenticOSRuntime()
 
 app = FastAPI(title=settings.app_name)
 app.add_middleware(
@@ -96,6 +98,11 @@ def providers() -> ProvidersResponse:
         **cloud_provider_status(),
         **discovery,
     )
+
+
+@app.get("/api/os/capabilities")
+def os_capabilities() -> dict[str, object]:
+    return agentic_os.capabilities()
 
 
 @app.post("/api/requirements/validate", response_model=RequirementValidationResponse)

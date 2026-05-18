@@ -1,5 +1,5 @@
 """Input guardrails for Mission Control."""
 
-from guardrails.requirements import RequirementGuardrailResult, validate_requirement
+from guardrails.requirements import RequirementGuardrailResult, classify_requirement, validate_requirement
 
-__all__ = ["RequirementGuardrailResult", "validate_requirement"]
+__all__ = ["RequirementGuardrailResult", "classify_requirement", "validate_requirement"]

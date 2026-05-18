@@ -20,6 +20,7 @@ class RequirementValidationResponse(BaseModel):
     category: str
     reason: str
     guidance: str
+    confidence: float = 1.0
 
 
 class RunResponse(BaseModel):

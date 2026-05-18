@@ -9,6 +9,7 @@ from agents.schemas import AgentInput
 from agents.deployment_agent import DeploymentAgent
 from agents.frontend_agent import FrontendAgent
 from agents.tester_agent import TesterAgent
+from app.core.control_loop import ControlLoopPolicy, ControlLoopState, ControlPhase
 from backend.app.config import get_settings
 from context.context_builder import ContextBuilder
 from database.repository import AGENTS, Repository
@@ -16,6 +17,7 @@ from evaluation.scorer import EvaluationScorer
 from llm_providers.factory import build_chat_provider
 from memory.long_term_memory import LongTermMemory
 from memory.short_term_memory import ShortTermMemory
+from observability.tracing import TraceEvent, TraceRecorder
 from tools.file_writer import write_artifacts
 
 
@@ -32,6 +34,7 @@ class SoftwareTeamState(TypedDict, total=False):
     revision_count: int
     stopped: bool
     failed: bool
+    control_loop: dict[str, object]
 
 
 class SoftwareTeamWorkflow:
@@ -44,6 +47,8 @@ class SoftwareTeamWorkflow:
         self.short_term_memory = ShortTermMemory(repository=self.repository)
         self.long_term_memory = LongTermMemory(repository=self.repository)
         self.evaluator = EvaluationScorer()
+        self.control_policy = ControlLoopPolicy(max_refinements=1)
+        self.trace_recorder = TraceRecorder(repository=self.repository)
         self.initial_graph = self._build_initial_graph().compile()
         self.deployment_graph = self._build_deployment_graph().compile()
 
@@ -72,6 +77,9 @@ class SoftwareTeamWorkflow:
             "bugs_found": False,
             "evaluation_passed": False,
             "revision_count": 0,
+            "control_loop": self._control_snapshot(
+                ControlLoopState(run_id=run.id, goal=run.requirement, phase=ControlPhase.SENSE)
+            ),
         }
         final_state = self.initial_graph.invoke(state)
         refreshed = self.repository.get_run(run_id)
@@ -111,6 +119,9 @@ class SoftwareTeamWorkflow:
             "bugs_found": False,
             "evaluation_passed": False,
             "revision_count": 0,
+            "control_loop": self._control_snapshot(
+                ControlLoopState(run_id=run.id, goal=run.requirement, phase=ControlPhase.SENSE)
+            ),
         }
         final_state = self.deployment_graph.invoke(state)
         refreshed = self.repository.get_run(run_id)
@@ -191,19 +202,26 @@ class SoftwareTeamWorkflow:
         revision: bool = False,
     ) -> SoftwareTeamState:
         run_id = int(state["run_id"])
+        control_state = self._control_from_state(state)
         if self.repository.stop_requested(run_id):
             self.repository.update_run(run_id, status="stopped", current_stage=stage)
             self.repository.add_log(run_id, agent.name, "Stopped", "Run stopped by the human manager.", status="warning")
-            return {**state, "stopped": True}
+            control_state.transition(ControlPhase.CANCELLED, agent.name, stage=stage)
+            self._record_trace(control_state, "workflow.cancelled", "Run stopped by the human manager.", "warning")
+            return {**state, "stopped": True, "control_loop": self._control_snapshot(control_state)}
 
         self.repository.update_run(run_id, current_stage=stage)
         self.repository.set_agent_status(run_id, agent.name, "thinking")
         self.repository.add_log(run_id, agent.name, "Thinking", f"{agent.name} is planning the {stage} step.")
+        control_state.transition(ControlPhase.PLAN, agent.name, stage=stage)
+        self._record_trace(control_state, "control.plan", f"{agent.name} is planning {stage}.")
 
         try:
             chat_provider = build_chat_provider(state.get("provider"), state.get("model"))
             chat_provider.validate()
             self.repository.set_agent_status(run_id, agent.name, "working")
+            control_state.transition(ControlPhase.ACT, agent.name, stage=stage, provider=state.get("provider"), model=state.get("model"))
+            self._record_trace(control_state, "control.act", f"{agent.name} is executing {stage}.")
             retrieved_memory = self.long_term_memory.retrieve(state["requirement"], limit=3)
             focused_context = self.context_builder.build(
                 user_requirement=state["requirement"],
@@ -246,8 +264,11 @@ class SoftwareTeamWorkflow:
                 **state,
                 "artifacts": artifacts,
                 "messages": [*state.get("messages", []), f"{agent.name}: {result.summary}"],
+                "control_loop": self._control_snapshot(control_state),
             }
             if captures_bugs:
+                control_state.transition(ControlPhase.EVALUATE, "Evaluator Agent", stage=stage)
+                self._record_trace(control_state, "control.evaluate", "Evaluator is scoring generated artifacts.")
                 updated["bugs_found"] = bool(result.bugs)
                 updated["bug_report"] = "\n".join(result.bugs)
                 evaluation = self.evaluator.score(
@@ -266,6 +287,7 @@ class SoftwareTeamWorkflow:
                     evaluation.model_dump_json(),
                     status="success" if evaluation.passed else "warning",
                 )
+                updated["control_loop"] = self._control_snapshot(control_state)
                 if result.bugs:
                     self.repository.add_log(
                         run_id,
@@ -279,7 +301,9 @@ class SoftwareTeamWorkflow:
             self.repository.set_agent_status(run_id, agent.name, "failed")
             self.repository.update_run(run_id, status="failed", current_stage=stage, error=str(exc))
             self.repository.add_log(run_id, agent.name, "Failed", str(exc), status="error")
-            return {**state, "failed": True}
+            control_state.transition(ControlPhase.FAILED, agent.name, stage=stage, error=str(exc))
+            self._record_trace(control_state, "control.failed", str(exc), "error")
+            return {**state, "failed": True, "control_loop": self._control_snapshot(control_state)}
 
     def _continue_or_end(self, state: SoftwareTeamState) -> Literal["continue", "end"]:
         if state.get("failed") or state.get("stopped"):
@@ -292,6 +316,9 @@ class SoftwareTeamWorkflow:
         needs_revision = state.get("bugs_found") or not state.get("evaluation_passed", False)
         if needs_revision and int(state.get("revision_count", 0)) < 1:
             run_id = int(state["run_id"])
+            control_state = self._control_from_state(state)
+            control_state.mark_refinement()
+            self._record_trace(control_state, "control.refine", "Evaluation requested one refinement pass.", "warning")
             self.repository.add_log(
                 run_id,
                 "Tester Agent",
@@ -299,6 +326,7 @@ class SoftwareTeamWorkflow:
                 "Testing or evaluation found issues. Sending feedback back to Backend and Frontend agents for one revision pass.",
                 status="warning",
             )
+            state["control_loop"] = self._control_snapshot(control_state)
             return "revise"
         if needs_revision:
             run_id = int(state["run_id"])
@@ -313,9 +341,58 @@ class SoftwareTeamWorkflow:
             )
             return "end"
         if state.get("evaluation_passed"):
+            control_state = self._control_from_state(state)
+            control_state.transition(ControlPhase.FINALIZE, "Evaluator Agent", stage="deployment_approval")
+            self._record_trace(control_state, "control.finalize", "Build phase passed and is ready for human approval.", "success")
             self.long_term_memory.remember(
                 "successful_solution",
                 f"Requirement: {state['requirement']}\nArtifacts: {', '.join(sorted(state.get('artifacts', {})))}",
                 source_run_id=int(state["run_id"]),
             )
         return "approval"
+
+    def _control_from_state(self, state: SoftwareTeamState) -> ControlLoopState:
+        raw = state.get("control_loop") or {}
+        control_state = ControlLoopState(
+            run_id=int(state["run_id"]),
+            goal=state["requirement"],
+            phase=ControlPhase(raw.get("phase", ControlPhase.SENSE.value)),
+            current_agent=raw.get("current_agent") if isinstance(raw.get("current_agent"), str) else None,
+            refinements=int(raw.get("refinements", 0)),
+            retries=dict(raw.get("retries", {})) if isinstance(raw.get("retries"), dict) else {},
+            cancelled=bool(raw.get("cancelled", False)),
+            metadata=dict(raw.get("metadata", {})) if isinstance(raw.get("metadata"), dict) else {},
+        )
+        return control_state
+
+    def _control_snapshot(self, control_state: ControlLoopState) -> dict[str, object]:
+        return {
+            "phase": control_state.phase.value,
+            "current_agent": control_state.current_agent,
+            "refinements": control_state.refinements,
+            "retries": control_state.retries,
+            "cancelled": control_state.cancelled,
+            "metadata": control_state.metadata,
+        }
+
+    def _record_trace(
+        self,
+        control_state: ControlLoopState,
+        event_type: str,
+        message: str,
+        status: str = "info",
+    ) -> None:
+        self.trace_recorder.record(
+            TraceEvent(
+                run_id=control_state.run_id,
+                component=control_state.current_agent or "Agentic OS",
+                event_type=event_type,
+                message=message,
+                status=status,
+                metadata={
+                    "phase": control_state.phase.value,
+                    "refinements": control_state.refinements,
+                    **control_state.metadata,
+                },
+            )
+        )
