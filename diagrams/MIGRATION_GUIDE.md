@@ -87,7 +87,7 @@ backend/app/main.py
   GET /api/os/capabilities
 ```
 
-## Next Migration Steps
+## Completed Migration Steps
 
 ### Step 1: API and Dashboard Visibility
 
@@ -102,6 +102,8 @@ Dashboard panels:
 - provider capabilities
 - MCP readiness
 ```
+
+Status: implemented.
 
 ### Step 2: Planner Node
 
@@ -121,6 +123,8 @@ Planner
 Backend / Frontend
 ```
 
+Status: implemented.
+
 ### Step 3: Reviewer and Security Nodes
 
 Add review gates before testing/deployment.
@@ -135,6 +139,8 @@ Backend + Frontend
        v
 Tester Agent
 ```
+
+Status: implemented.
 
 ### Step 4: Evaluator-Driven Repair Loop
 
@@ -153,6 +159,8 @@ Evaluator
   +-- fail final --> blocked deployment
 ```
 
+Status: partially implemented. The Evaluator Agent is now a graph node, while deterministic/LLM evaluation remains the authoritative scorer.
+
 ### Step 5: Tool Execution Policy
 
 Route tool calls through `tools/registry.py`.
@@ -168,6 +176,8 @@ Tool Registry
      +--> blocked tool -> log and fail safely
 ```
 
+Status: policy contract implemented.
+
 ### Step 6: MCP Adapters
 
 Expose approved local tools through MCP-compatible descriptors first, then add real MCP client/server integration.
@@ -182,6 +192,16 @@ MCP Manifest
     +--> OpenAI Agents SDK compatible tools
     +--> external tool providers
 ```
+
+Status: MCP-compatible manifest implemented; full MCP server/client adapters remain future work.
+
+## Next Migration Steps
+
+- Add real MCP server/client integrations for approved local tools.
+- Add sandboxed terminal/Python execution.
+- Add model-router fallback execution, streaming, and persisted token/cost metrics.
+- Add RBAC, API key vaulting, rate limiting, and concurrency limits.
+- Add PostgreSQL and Qdrant/ChromaDB deployment profiles.
 
 ## Future Enterprise Track
 

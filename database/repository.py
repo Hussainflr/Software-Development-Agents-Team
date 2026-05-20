@@ -19,7 +19,16 @@ from database.models import (
 from database.session import SessionLocal
 
 
-AGENTS = ["Backend Agent", "Frontend Agent", "Tester Agent", "Deployment Agent"]
+AGENTS = [
+    "Planner Agent",
+    "Backend Agent",
+    "Frontend Agent",
+    "Reviewer Agent",
+    "Security Agent",
+    "Tester Agent",
+    "Evaluator Agent",
+    "Deployment Agent",
+]
 
 
 def now_utc() -> datetime:

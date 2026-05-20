@@ -7,13 +7,18 @@ from agents.backend_agent import BackendAgent
 from agents.base import BaseAgent
 from agents.schemas import AgentInput
 from agents.deployment_agent import DeploymentAgent
+from agents.evaluator_agent import EvaluatorAgent
 from agents.frontend_agent import FrontendAgent
+from agents.planner_agent import PlannerAgent
+from agents.reviewer_agent import ReviewerAgent
+from agents.security_agent import SecurityAgent
 from agents.tester_agent import TesterAgent
 from app.core.control_loop import ControlLoopPolicy, ControlLoopState, ControlPhase
 from backend.app.config import get_settings
 from context.context_builder import ContextBuilder
 from database.repository import AGENTS, Repository
 from evaluation.scorer import EvaluationScorer
+from evaluation.test_execution import GeneratedTestRunner
 from llm_providers.factory import build_chat_provider
 from memory.long_term_memory import LongTermMemory
 from memory.short_term_memory import ShortTermMemory
@@ -47,6 +52,7 @@ class SoftwareTeamWorkflow:
         self.short_term_memory = ShortTermMemory(repository=self.repository)
         self.long_term_memory = LongTermMemory(repository=self.repository)
         self.evaluator = EvaluationScorer()
+        self.generated_test_runner = GeneratedTestRunner()
         self.control_policy = ControlLoopPolicy(max_refinements=1)
         self.trace_recorder = TraceRecorder(repository=self.repository)
         self.initial_graph = self._build_initial_graph().compile()
@@ -63,7 +69,7 @@ class SoftwareTeamWorkflow:
             run_id,
             "Human Manager",
             "Run started",
-            "Requirement accepted. Backend Agent is taking the first pass.",
+            "Requirement accepted. Planner Agent is preparing the execution plan.",
         )
 
         state: SoftwareTeamState = {
@@ -142,16 +148,24 @@ class SoftwareTeamWorkflow:
 
     def _build_initial_graph(self) -> StateGraph:
         graph = StateGraph(SoftwareTeamState)
+        graph.add_node("planner", self._planner_node)
         graph.add_node("backend", self._backend_node)
         graph.add_node("frontend", self._frontend_node)
+        graph.add_node("reviewer", self._reviewer_node)
+        graph.add_node("security", self._security_node)
         graph.add_node("tester", self._tester_node)
+        graph.add_node("evaluator", self._evaluator_node)
         graph.add_node("backend_revision", self._backend_revision_node)
         graph.add_node("frontend_revision", self._frontend_revision_node)
 
-        graph.add_edge(START, "backend")
+        graph.add_edge(START, "planner")
+        graph.add_conditional_edges("planner", self._continue_or_end, {"continue": "backend", "end": END})
         graph.add_conditional_edges("backend", self._continue_or_end, {"continue": "frontend", "end": END})
-        graph.add_conditional_edges("frontend", self._continue_or_end, {"continue": "tester", "end": END})
-        graph.add_conditional_edges("tester", self._route_after_testing, {
+        graph.add_conditional_edges("frontend", self._continue_or_end, {"continue": "reviewer", "end": END})
+        graph.add_conditional_edges("reviewer", self._continue_or_end, {"continue": "security", "end": END})
+        graph.add_conditional_edges("security", self._continue_or_end, {"continue": "tester", "end": END})
+        graph.add_conditional_edges("tester", self._continue_or_end, {"continue": "evaluator", "end": END})
+        graph.add_conditional_edges("evaluator", self._route_after_testing, {
             "revise": "backend_revision",
             "approval": END,
             "end": END,
@@ -161,7 +175,7 @@ class SoftwareTeamWorkflow:
             "end": END,
         })
         graph.add_conditional_edges("frontend_revision", self._continue_or_end, {
-            "continue": "tester",
+            "continue": "reviewer",
             "end": END,
         })
         return graph
@@ -173,14 +187,26 @@ class SoftwareTeamWorkflow:
         graph.add_edge("deployment", END)
         return graph
 
+    def _planner_node(self, state: SoftwareTeamState) -> SoftwareTeamState:
+        return self._run_agent(state, PlannerAgent(), "planning")
+
     def _backend_node(self, state: SoftwareTeamState) -> SoftwareTeamState:
         return self._run_agent(state, BackendAgent(), "backend")
 
     def _frontend_node(self, state: SoftwareTeamState) -> SoftwareTeamState:
         return self._run_agent(state, FrontendAgent(), "frontend")
 
+    def _reviewer_node(self, state: SoftwareTeamState) -> SoftwareTeamState:
+        return self._run_agent(state, ReviewerAgent(), "review")
+
+    def _security_node(self, state: SoftwareTeamState) -> SoftwareTeamState:
+        return self._run_agent(state, SecurityAgent(), "security")
+
     def _tester_node(self, state: SoftwareTeamState) -> SoftwareTeamState:
         return self._run_agent(state, TesterAgent(), "testing", captures_bugs=True)
+
+    def _evaluator_node(self, state: SoftwareTeamState) -> SoftwareTeamState:
+        return self._run_agent(state, EvaluatorAgent(), "evaluation")
 
     def _backend_revision_node(self, state: SoftwareTeamState) -> SoftwareTeamState:
         next_state = dict(state)
@@ -269,11 +295,26 @@ class SoftwareTeamWorkflow:
             if captures_bugs:
                 control_state.transition(ControlPhase.EVALUATE, "Evaluator Agent", stage=stage)
                 self._record_trace(control_state, "control.evaluate", "Evaluator is scoring generated artifacts.")
-                updated["bugs_found"] = bool(result.bugs)
-                updated["bug_report"] = "\n".join(result.bugs)
+                test_execution = self.generated_test_runner.run(artifacts)
+                execution_report = {"generated_tests/EXECUTION_REPORT.md": test_execution.to_markdown()}
+                artifacts = {**artifacts, **execution_report}
+                write_artifacts(run_dir, execution_report)
+                self.repository.upsert_generated_files(run_id, "Tester Agent", execution_report)
+                self.repository.add_log(
+                    run_id,
+                    "Tester Agent",
+                    "Executed generated tests" if test_execution.attempted else "Skipped generated tests",
+                    test_execution.summary,
+                    status="success" if test_execution.passed else "warning",
+                )
+                execution_bugs = [] if test_execution.passed else [test_execution.summary]
+                all_bugs = [*result.bugs, *execution_bugs]
+                updated["artifacts"] = artifacts
+                updated["bugs_found"] = bool(all_bugs)
+                updated["bug_report"] = "\n".join(all_bugs)
                 evaluation = self.evaluator.score(
                     artifacts,
-                    result.bugs,
+                    all_bugs,
                     requirement=state["requirement"],
                     llm_judge=chat_provider.chat_model,
                 )
@@ -288,12 +329,12 @@ class SoftwareTeamWorkflow:
                     status="success" if evaluation.passed else "warning",
                 )
                 updated["control_loop"] = self._control_snapshot(control_state)
-                if result.bugs:
+                if all_bugs:
                     self.repository.add_log(
                         run_id,
                         agent.name,
                         "Bugs found",
-                        "\n".join(result.bugs),
+                        "\n".join(all_bugs),
                         status="warning",
                     )
             return updated

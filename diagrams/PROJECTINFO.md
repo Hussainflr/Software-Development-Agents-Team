@@ -35,14 +35,26 @@ agent_team.db
 LangGraph Workflow
 workflows/software_team_graph.py
      |
+     +--> Planner Agent
+     |    agents/planner_agent.py
+     |
      +--> Backend Agent
      |    agents/backend_agent.py
      |
      +--> Frontend Agent
      |    agents/frontend_agent.py
      |
+     +--> Reviewer Agent
+     |    agents/reviewer_agent.py
+     |
+     +--> Security Agent
+     |    agents/security_agent.py
+     |
      +--> Tester Agent
      |    agents/tester_agent.py
+     |
+     +--> Evaluator Agent
+     |    agents/evaluator_agent.py
      |
      +--> Human Approval Gate
      |
@@ -65,10 +77,12 @@ Agents call:
      |    llm_providers/factory.py
      |    llm_providers/langchain_client.py
      |    llm_providers/catalog.py
+     |    llm_providers/router.py
      |
      +--> Tool Registry / MCP Descriptor
      |    tools/registry.py
      |    tools/mcp.py
+     |    tools/permissions.py
      |
      +--> File Writer
           tools/file_writer.py
@@ -154,9 +168,13 @@ Agents call:
 | `agents/base.py` | Shared agent base class. Builds prompt payloads, wires LangChain prompt/model/parser chain, parses structured output, and falls back if output is invalid. | Subclassed by all agents; called by workflow. |
 | `agents/catalog.py` | Declarative Agentic OS catalog for Planner, Research, Coder, Backend, Frontend, Debugger, Tester, Reviewer, Security, Deployment, Evaluator, and Memory agents. | Used by `app/core/agentic_os.py` to expose OS capabilities. |
 | `agents/schemas.py` | Pydantic `AgentInput` and `AgentOutput` models. Defines the contract agents receive and return. | Used by `agents/base.py`, concrete agents, tests, and workflow. |
+| `agents/planner_agent.py` | Planner Agent. Creates execution plan, acceptance criteria, and approval checkpoints. | First node in `SoftwareTeamWorkflow`. |
 | `agents/backend_agent.py` | Backend Agent. Sets role/task prompt/skills and returns backend fallback artifacts when needed. | Instantiated by `SoftwareTeamWorkflow`. |
 | `agents/frontend_agent.py` | Frontend Agent. Sets role/task prompt/skills and returns frontend fallback artifacts when needed. | Instantiated by `SoftwareTeamWorkflow`. |
+| `agents/reviewer_agent.py` | Reviewer Agent. Produces architecture/code consistency review artifacts. | Runs after Frontend Agent and before Security/Testing. |
+| `agents/security_agent.py` | Security Agent. Reviews generated artifacts for secrets, dangerous commands, and permission risks. | Runs before testing and can report blockers. |
 | `agents/tester_agent.py` | Tester Agent. Sets testing/review skills and returns test fallback artifacts when needed. | Instantiated by `SoftwareTeamWorkflow`; its bugs feed the revision loop. |
+| `agents/evaluator_agent.py` | Evaluator Agent. Produces final quality-gate notes after Tester execution. | Runs before deployment approval routing. |
 | `agents/deployment_agent.py` | Deployment Agent. Sets deployment skill and returns Docker/local deployment fallback artifacts when needed. | Instantiated by deployment graph after human approval. |
 | `agents/__init__.py` | Marks `agents` as a package. | Python import system. |
 
@@ -168,7 +186,11 @@ Agents call:
 | `prompts/agent_task.md` | Main human-message prompt template. Receives agent name, role, task, skills, focused context, and format instructions. | Loaded by `BaseAgent.prompt_template()`. |
 | `prompts/backend_task.md` | Backend-specific task instructions. | Referenced by `BackendAgent.task_prompt`. |
 | `prompts/frontend_task.md` | Frontend-specific task instructions. | Referenced by `FrontendAgent.task_prompt`. |
+| `prompts/planner_task.md` | Planner-specific task instructions. | Referenced by `PlannerAgent.task_prompt`. |
+| `prompts/reviewer_task.md` | Reviewer-specific task instructions. | Referenced by `ReviewerAgent.task_prompt`. |
+| `prompts/security_task.md` | Security-specific task instructions. | Referenced by `SecurityAgent.task_prompt`. |
 | `prompts/tester_task.md` | Tester-specific task instructions. | Referenced by `TesterAgent.task_prompt`. |
+| `prompts/evaluator_task.md` | Evaluator-specific task instructions. | Referenced by `EvaluatorAgent.task_prompt`. |
 | `prompts/deployment_task.md` | Deployment-specific task instructions. | Referenced by `DeploymentAgent.task_prompt`. |
 | `prompts/assembler.py` | Dynamic prompt assembly from agent role, user goal, task, skills, memory, granted tools, guardrails, and runtime context. | Tested by `tests/test_agentic_os_core.py`; intended for future agent runtime expansion. |
 | `prompts/loader.py` | Reads prompt templates from the `prompts/` directory. | Used by `agents/base.py`. |
@@ -181,6 +203,7 @@ Agents call:
 | `llm_providers/factory.py` | Normalizes provider/model names, exposes provider options, and builds `LangChainChatProvider`. | Used by FastAPI provider endpoint and `SoftwareTeamWorkflow`. |
 | `llm_providers/langchain_client.py` | Creates provider-specific LangChain chat models for Ollama, OpenAI, and Anthropic. Validates provider readiness, discovers local Ollama models, and checks API key requirements. | Used by `llm_providers/factory.py`. |
 | `llm_providers/catalog.py` | Provider capability metadata for Ollama, LM Studio, OpenAI, Anthropic, Gemini, Groq, OpenRouter, and Together AI. | Used by `app/core/agentic_os.py`. |
+| `llm_providers/router.py` | LiteLLM-style router facade with fallback route contract plus token, cost, and latency metric estimates. | Used by Agentic OS capability/runtime tests and future provider routing. |
 | `llm_providers/base.py` | Defines shared LLM/provider exception classes. | Imported by provider client. |
 | `llm_providers/__init__.py` | Marks `llm_providers` as a package. | Python import system. |
 
@@ -206,6 +229,8 @@ Agents call:
 | `memory/__init__.py` | Marks `memory` as a package. | Python import system. |
 | `evaluation/schemas.py` | Shared evaluation models for score results, LLM judge findings, and deterministic checklist details. | Imported by all evaluation modules and persisted through `repository.add_evaluation()`. |
 | `evaluation/deterministic.py` | Checklist evaluator for required artifacts, obvious quality signals, placeholders, secrets, and basic runnable app expectations. | Called by `evaluation/scorer.py` during the Tester stage. |
+| `evaluation/consistency.py` | Checks that frontend/test endpoint references exist in generated backend routes. | Used by deterministic evaluation and tested by `tests/test_agentic_os_runtime_gates.py`. |
+| `evaluation/test_execution.py` | Runs generated pytest files in an isolated temporary directory and captures stdout/stderr into a report. | Used by `SoftwareTeamWorkflow` during the Tester stage. |
 | `evaluation/llm_judge.py` | Optional LLM-as-judge evaluator. Builds a compact artifact preview, asks the selected chat model for JSON scoring, and parses the response. | Called by `evaluation/scorer.py` when a chat model is available. |
 | `evaluation/scorer.py` | Hybrid evaluation orchestrator. Combines deterministic scoring and optional LLM-as-judge review into one conservative pass/fail result. | Used by Tester stage in `SoftwareTeamWorkflow`. |
 | `evaluation/__init__.py` | Exports the public evaluation classes and models. | Python imports and future extension code. |
@@ -238,6 +263,7 @@ Agents call:
 | `tools/artifact_sanitizer.py` | Normalizes generated artifacts before persistence. Python files are stripped of accidental Markdown/code-block indentation and compile-checked before being stored or written. | Used by `agents/base.py` and `tools/file_writer.py`; tested by `tests/test_artifact_sanitizer.py`. |
 | `tools/file_writer.py` | Safely writes generated artifacts under the run directory and blocks path traversal. Makes `.sh` files executable. | Used by `SoftwareTeamWorkflow._run_agent()`; tested by `tests/test_file_writer.py`. |
 | `tools/registry.py` | Permissioned Agentic OS tool catalog with risk level, approval requirement, timeout, and MCP compatibility metadata. | Used by `app/core/agentic_os.py` and tests. |
+| `tools/permissions.py` | Human approval policy for registered tools. Blocks approval-required tools until approval is supplied. | Used by Agentic OS capability/runtime tests and future tool execution. |
 | `tools/mcp.py` | Converts local tool definitions into MCP-compatible descriptors/manifests. | Used by `app/core/agentic_os.py`. |
 | `tools/__init__.py` | Marks `tools` as a package. | Python import system. |
 
@@ -283,6 +309,7 @@ Agents call:
 | --- | --- | --- |
 | `tests/test_agent_parser.py` | Tests tolerant parsing of LLM JSON output. | `pytest`. |
 | `tests/test_agentic_os_core.py` | Tests control-loop policy, guardrail classification, dynamic prompt assembly, tool permissions, provider catalog, and OS capabilities. | `pytest`. |
+| `tests/test_agentic_os_runtime_gates.py` | Tests endpoint consistency checks, generated test execution, tool permission policy, and model router metrics. | `pytest`. |
 | `tests/test_artifact_sanitizer.py` | Tests Python artifact normalization, Markdown fence stripping, compile checks, and validation failures. | `pytest`. |
 | `tests/test_context_builder.py` | Tests focused context selection by agent/task. | `pytest`. |
 | `tests/test_evaluation_scorer.py` | Tests evaluation scoring behavior. | `pytest`. |

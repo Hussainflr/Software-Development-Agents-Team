@@ -6,7 +6,9 @@ from agents.catalog import list_agent_definitions
 from app.core.control_loop import ControlLoopPolicy
 from guardrails.requirements import classify_requirement
 from llm_providers.catalog import list_model_provider_capabilities
+from llm_providers.router import ModelRouter
 from tools.mcp import render_mcp_manifest
+from tools.permissions import ToolPermissionPolicy
 from tools.registry import list_tools
 
 
@@ -15,6 +17,8 @@ class AgenticOSRuntime:
 
     def __init__(self, control_policy: ControlLoopPolicy | None = None) -> None:
         self.control_policy = control_policy or ControlLoopPolicy()
+        self.model_router = ModelRouter()
+        self.tool_policy = ToolPermissionPolicy()
 
     def capabilities(self) -> dict[str, object]:
         tools = list_tools()
@@ -27,6 +31,14 @@ class AgenticOSRuntime:
             "mcp": {
                 "status": "adapter-ready",
                 "manifest": render_mcp_manifest(tools),
+            },
+            "model_router": {
+                "status": "metrics-ready",
+                "features": ["fallback_route_contract", "token_estimates", "cost_estimates", "latency_metrics"],
+            },
+            "permissions": {
+                "status": "policy-ready",
+                "approval_required_tools": [tool.name for tool in tools if tool.requires_approval],
             },
         }
 

@@ -58,7 +58,7 @@
               |                          |                          |
               v                          v                          v
       +---------------+          +---------------+          +---------------+
-      | Local Models  |          | Cloud Models  |          | Future Router |
+      | Local Models  |          | Cloud Models  |          | Model Router  |
       | Ollama        |          | OpenAI        |          | fallback      |
       | LM Studio     |          | Anthropic     |          | token/cost    |
       | localhost     |          | Gemini/Groq   |          | streaming     |
@@ -85,7 +85,7 @@
       OpenAI: OPENAI_API_KEY
       Anthropic: ANTHROPIC_API_KEY
 
-5. If future router is enabled:
+5. Model router facade:
       route by task capability, availability, cost, latency, and fallback policy
 ```
 
@@ -101,6 +101,6 @@
 | Capability Catalog   | Describe provider features and constraints    |
 | LangChain Provider   | Build actual chat model instance              |
 | Agent Base           | Invoke model and parse structured output      |
-| Future Router        | Fallbacks, retries, token/cost/latency metrics|
+| Model Router         | Fallback route contract, token/cost/latency metrics|
 +----------------------+----------------------------------------------+
 ```

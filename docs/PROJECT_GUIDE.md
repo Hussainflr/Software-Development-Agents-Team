@@ -26,31 +26,40 @@ Agentic OS Control Loop
 sense -> plan -> act -> evaluate -> refine/retry -> finalize
      |
      v
-Backend Agent -> Frontend Agent -> Tester Agent
-     |                              |
-     |                              v
-     |                         Evaluation
-     |                              |
-     +---------- revision loop <----+
-                                    |
-                                    v
-                          Human Deployment Approval
-                                    |
-                                    v
-                            Deployment Agent
+Planner Agent
+     |
+     v
+Backend Agent -> Frontend Agent -> Reviewer Agent -> Security Agent
+                                                     |
+                                                     v
+                                               Tester Agent
+                                                     |
+                                                     v
+                                              Evaluator Agent
+                                                     |
+                           revision loop <----------+
+                                                     |
+                                                     v
+                                           Human Deployment Approval
+                                                     |
+                                                     v
+                                             Deployment Agent
 ```
 
 Run behavior:
 
 1. The dashboard validates your requirement.
-2. Backend Agent creates backend artifacts.
-3. Frontend Agent creates UI artifacts.
-4. Tester Agent writes/reviews tests.
-5. Evaluation scores correctness, completeness, and code quality.
-6. If issues are found, the workflow gets one revision pass.
-7. If evaluation still fails, deployment approval is blocked.
-8. If evaluation passes, you can approve deployment.
-9. Generated files appear in `generated_projects/run_<id>/`.
+2. Planner Agent creates an execution plan and acceptance criteria.
+3. Backend Agent creates backend artifacts.
+4. Frontend Agent creates UI artifacts.
+5. Reviewer Agent checks architecture and consistency.
+6. Security Agent checks secrets, unsafe actions, and permission risks.
+7. Tester Agent writes/reviews tests and runs generated pytest files when present.
+8. Evaluation scores correctness, completeness, code quality, endpoint consistency, and requirement alignment.
+9. If issues are found, the workflow gets one revision pass.
+10. If evaluation still fails, deployment approval is blocked.
+11. If evaluation passes, you can approve deployment.
+12. Generated files appear in `generated_projects/run_<id>/`.
 
 ## Requirement Guardrails
 
@@ -215,10 +224,14 @@ app/core/control_loop.py      reusable execution phases and retry/refinement pol
 app/core/agentic_os.py        capability facade for API and dashboard
 agents/catalog.py             full future agent catalog
 tools/registry.py             permissioned local tool registry
+tools/permissions.py          human approval policy for registered tools
 tools/mcp.py                  MCP-compatible manifest/descriptors
 llm_providers/catalog.py      model provider capability metadata
+llm_providers/router.py       fallback/metrics router facade
 prompts/assembler.py          dynamic prompt composition
 observability/tracing.py      structured trace events persisted through logs
+evaluation/consistency.py     backend/frontend/test route consistency
+evaluation/test_execution.py  generated pytest execution
 ```
 
 ## How Agents Communicate
@@ -227,7 +240,11 @@ Agents communicate through LangGraph state and persisted records:
 
 - Backend Agent writes backend artifacts and a summary.
 - Frontend Agent receives backend context and writes UI artifacts.
+- Reviewer Agent writes an architecture/code review report.
+- Security Agent writes a security review report and can report blockers.
 - Tester Agent reviews artifacts and writes tests.
+- Generated tests are executed in an isolated temporary directory when possible.
+- Evaluator Agent writes quality-gate notes.
 - Evaluation records pass/fail scores.
 - If needed, the workflow sends feedback into one revision pass.
 - Deployment Agent runs only after evaluation passes and the human manager approves.

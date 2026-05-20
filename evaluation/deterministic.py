@@ -1,5 +1,6 @@
 from typing import Any
 
+from evaluation.consistency import EndpointConsistencyChecker
 from evaluation.schemas import ChecklistResult, EvaluationScore
 
 
@@ -8,6 +9,9 @@ class DeterministicEvaluator:
 
     pass_threshold = 7
 
+    def __init__(self, endpoint_checker: EndpointConsistencyChecker | None = None) -> None:
+        self.endpoint_checker = endpoint_checker or EndpointConsistencyChecker()
+
     def score(self, artifacts: dict[str, str], bugs: list[str], requirement: str = "") -> ChecklistResult:
         backend = artifacts.get("generated_backend/main.py", "")
         frontend = artifacts.get("generated_frontend/app.py", "")
@@ -15,6 +19,7 @@ class DeterministicEvaluator:
             content for path, content in artifacts.items() if path.startswith("generated_tests/") and path.endswith(".py")
         )
         requirement_checks = self._requirement_alignment_checks(requirement, backend, frontend, tests)
+        endpoint_consistency = self.endpoint_checker.check(artifacts)
 
         correctness_checks = {
             "backend FastAPI app exists": bool(backend and "FastAPI" in backend),
@@ -22,6 +27,7 @@ class DeterministicEvaluator:
             "backend has health endpoint": "/health" in backend,
             "frontend Streamlit app exists": bool(frontend and ("streamlit" in frontend.lower() or "st." in frontend)),
             "tests contain assertions": bool(tests and "assert " in tests),
+            "frontend/tests reference existing backend routes": endpoint_consistency.passed,
             **requirement_checks,
         }
         completeness_checks = {

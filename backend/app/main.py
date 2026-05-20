@@ -1,4 +1,6 @@
 import threading
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,7 +42,16 @@ repository = Repository()
 workflow = SoftwareTeamWorkflow(repository=repository)
 agentic_os = AgenticOSRuntime()
 
-app = FastAPI(title=settings.app_name)
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    init_db()
+    settings.generated_root.mkdir(parents=True, exist_ok=True)
+    repository.interrupt_active_runs()
+    yield
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,13 +59,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    init_db()
-    settings.generated_root.mkdir(parents=True, exist_ok=True)
-    repository.interrupt_active_runs()
 
 
 def launch_background(target, run_id: int) -> None:

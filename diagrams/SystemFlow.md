@@ -94,16 +94,19 @@
 +----------------------------------------------------+
 | Active Software Team Graph                         |
 |                                                    |
-| Backend Agent -> Frontend Agent -> Tester Agent    |
-|       ^                         |                  |
-|       |                         v                  |
-|       +----- revision loop < Evaluation            |
-|                                      |             |
-|                                      v             |
-|                          Human Approval Gate       |
-|                                      |             |
-|                                      v             |
-|                              Deployment Agent      |
+| Planner Agent                                      |
+|      |                                             |
+|      v                                             |
+| Backend -> Frontend -> Reviewer -> Security        |
+|      ^                              |              |
+|      |                              v              |
+|      +------ revision loop < Tester -> Evaluator   |
+|                                     |              |
+|                                     v              |
+|                         Human Approval Gate        |
+|                                     |              |
+|                                     v              |
+|                             Deployment Agent       |
 +------------------------+---------------------------+
                          |
                          v
@@ -136,10 +139,14 @@ Human Manager
   -> FastAPI
   -> Requirement Guardrails
   -> LangGraph
+  -> Planner Agent
   -> Backend Agent
   -> Frontend Agent
+  -> Reviewer Agent
+  -> Security Agent
   -> Tester Agent
-  -> Evaluation
+  -> Generated Test Execution
+  -> Evaluator Agent
   -> Revision Loop if needed
   -> Human Approval
   -> Deployment Agent

@@ -57,8 +57,8 @@ Observability + Trace Events
 2. Add Agentic OS contracts without forcing a large folder rename.
 3. Expose platform capabilities through API so the dashboard can inspect agents, tools, models, and MCP readiness.
 4. Wire control-loop phases into the existing LangGraph workflow.
-5. Add Planner, Reviewer, Security, and Evaluator nodes incrementally.
-6. Add real tool execution policies and MCP server/client adapters after local permissions are stable.
+5. Keep Planner, Reviewer, Security, and Evaluator nodes inside the compatibility graph while expanding their capabilities.
+6. Add real MCP server/client adapters after local permissions are stable.
 
 ## First Increment Implemented
 
@@ -73,6 +73,14 @@ Observability + Trace Events
 - `guardrails/requirements.py`: stronger intent, prompt-injection, unsafe request, and PII checks.
 - `skills/*.md`: expanded modular skills registry.
 - `GET /api/os/capabilities`: runtime capability endpoint.
+- `agents/planner_agent.py`: execution planning node before implementation.
+- `agents/reviewer_agent.py`: architecture/code consistency review node.
+- `agents/security_agent.py`: security and permission review node.
+- `agents/evaluator_agent.py`: explicit quality-gate node after testing.
+- `evaluation/test_execution.py`: generated pytest execution with captured output.
+- `evaluation/consistency.py`: backend/frontend/test endpoint consistency checks.
+- `llm_providers/router.py`: LiteLLM-style routing and token/cost/latency metric facade.
+- `tools/permissions.py`: approval policy gate for registered tools.
 
 ## Diagram Index
 
@@ -83,17 +91,20 @@ Observability + Trace Events
 
 ## Roadmap
 
-### Next
+### Completed In Current Increment
 
-- Add Planner Agent node before implementation.
-- Add Reviewer and Security nodes before Tester.
-- Add generated-project test execution with captured stdout and stderr.
-- Add endpoint consistency checks across backend, frontend, and tests.
-- Add dashboard panels for graph state, traces, retries, OS capabilities, and blocked actions.
+- Planner Agent runs before Backend Agent.
+- Reviewer and Security Agents run before Tester Agent.
+- Evaluator Agent runs as an explicit quality gate after Tester Agent.
+- Generated project tests execute in an isolated temporary run directory.
+- Endpoint consistency checks compare backend routes against frontend/test references.
+- Dashboard shows expanded agent cards and Agentic OS capability panels.
+- Model router facade exposes fallback, token estimate, cost estimate, and latency metric contracts.
+- Tool permission policy blocks approval-required tools until human approval is provided.
 
 ### Later
 
-- Add LiteLLM-style model router with fallback routing, token tracking, cost tracking, and streaming.
+- Add model-router fallback execution, streaming, and persisted token/cost metrics.
 - Add artifact manifests and immutable artifact versions per run.
 - Add PostgreSQL and Qdrant/ChromaDB deployment profiles.
 - Add RBAC, API key vaulting, rate limiting, concurrency limits, and sandboxed tool execution.

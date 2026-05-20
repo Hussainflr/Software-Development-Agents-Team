@@ -8,16 +8,29 @@ import streamlit as st
 
 
 API_URL = os.getenv("MISSION_CONTROL_API_URL", "http://localhost:8000").rstrip("/")
-AGENT_ORDER = ["Backend Agent", "Frontend Agent", "Tester Agent", "Deployment Agent"]
-STAGES = ["Requirement", "Backend", "Frontend", "Testing", "Deployment"]
+AGENT_ORDER = [
+    "Planner Agent",
+    "Backend Agent",
+    "Frontend Agent",
+    "Reviewer Agent",
+    "Security Agent",
+    "Tester Agent",
+    "Evaluator Agent",
+    "Deployment Agent",
+]
+STAGES = ["Requirement", "Plan", "Backend", "Frontend", "Review", "Testing", "Approval", "Deployment"]
 STAGE_PROGRESS = {
     "requirement": 5,
-    "backend": 20,
-    "backend_revision": 35,
-    "frontend": 45,
-    "frontend_revision": 60,
+    "planning": 12,
+    "backend": 24,
+    "backend_revision": 30,
+    "frontend": 40,
+    "frontend_revision": 45,
+    "review": 55,
+    "security": 65,
     "testing": 75,
-    "deployment_approval": 85,
+    "evaluation": 82,
+    "deployment_approval": 88,
     "deployment": 92,
     "completed": 100,
     "stopped": 0,
@@ -56,7 +69,7 @@ st.markdown(
       .status-dot { width: 0.65rem; height: 0.65rem; border-radius: 999px; display: inline-block; }
       .stage-row {
         display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+        grid-template-columns: repeat(8, minmax(0, 1fr));
         gap: 0.5rem;
         margin: 0.4rem 0 1rem 0;
       }
@@ -117,6 +130,10 @@ def get_providers() -> dict:
     return data
 
 
+def get_os_capabilities() -> dict:
+    return api_request("GET", "/api/os/capabilities") or {}
+
+
 def validate_requirement_with_api(requirement: str) -> dict:
     data = api_request("POST", "/api/requirements/validate", json={"requirement": requirement})
     if data:
@@ -142,9 +159,13 @@ def unique_models(models: list[str]) -> list[str]:
 def status_card(agent_name: str, status: str) -> str:
     color = STATUS_COLORS.get(status, "#6b7280")
     role = {
+        "Planner Agent": "Plan and acceptance criteria",
         "Backend Agent": "APIs and data model",
         "Frontend Agent": "UI and API integration",
+        "Reviewer Agent": "Architecture and consistency",
+        "Security Agent": "Safety and permissions",
         "Tester Agent": "Tests and review",
+        "Evaluator Agent": "Quality gate decision",
         "Deployment Agent": "Docker and local deploy",
     }.get(agent_name, "Agent")
     return f"""
@@ -163,19 +184,26 @@ def progress_html(run: dict, statuses: dict[str, str]) -> str:
     current = run.get("current_stage", "requirement")
     completed = {
         "Requirement": True,
+        "Plan": statuses.get("Planner Agent") == "completed",
         "Backend": statuses.get("Backend Agent") == "completed",
         "Frontend": statuses.get("Frontend Agent") == "completed",
+        "Review": statuses.get("Reviewer Agent") == "completed" and statuses.get("Security Agent") == "completed",
         "Testing": statuses.get("Tester Agent") == "completed",
+        "Approval": run.get("status") in {"waiting_approval", "completed"} or statuses.get("Evaluator Agent") == "completed",
         "Deployment": statuses.get("Deployment Agent") == "completed",
     }
     active_map = {
+        "planning": "Plan",
         "backend": "Backend",
         "backend_revision": "Backend",
         "frontend": "Frontend",
         "frontend_revision": "Frontend",
+        "review": "Review",
+        "security": "Review",
         "testing": "Testing",
+        "evaluation": "Testing",
+        "deployment_approval": "Approval",
         "deployment": "Deployment",
-        "deployment_approval": "Deployment",
     }
     active = active_map.get(current, "Requirement")
     cells = []
@@ -200,11 +228,15 @@ def workflow_progress(run: dict, statuses: dict[str, str]) -> tuple[int, str]:
     progress = min(STAGE_PROGRESS.get(stage, 5) + agent_bonus, 99)
     labels = {
         "requirement": "Requirement accepted",
+        "planning": "Planner Agent running",
         "backend": "Backend Agent running",
         "backend_revision": "Backend revision running",
         "frontend": "Frontend Agent running",
         "frontend_revision": "Frontend revision running",
+        "review": "Reviewer Agent running",
+        "security": "Security Agent running",
         "testing": "Tester Agent running",
+        "evaluation": "Evaluator Agent running",
         "deployment_approval": "Waiting for deployment approval",
         "deployment": "Deployment Agent running",
     }
@@ -258,6 +290,7 @@ def language_for(path: str) -> str:
 
 
 providers = get_providers()
+os_capabilities = get_os_capabilities()
 provider_options = providers["options"]
 provider_ids = [item["id"] for item in provider_options]
 provider_labels = {item["id"]: item["label"] for item in provider_options}
@@ -314,6 +347,23 @@ with st.sidebar:
                 f"- `{recommendation['provider']}` / `{recommendation['model']}`: "
                 f"{recommendation['reason']}"
             )
+    st.divider()
+    st.header("Agentic OS")
+    if os_capabilities:
+        control_loop = os_capabilities.get("control_loop", {})
+        st.caption(
+            f"Agents: {len(os_capabilities.get('agents', []))} | "
+            f"Tools: {len(os_capabilities.get('tools', []))} | "
+            f"MCP: {os_capabilities.get('mcp', {}).get('status', 'unknown')}"
+        )
+        st.caption(
+            "Refinements: "
+            f"{control_loop.get('max_refinements', 'n/a')} | "
+            "Retries/step: "
+            f"{control_loop.get('max_retries_per_step', 'n/a')}"
+        )
+    else:
+        st.caption("OS capability endpoint unavailable.")
     st.divider()
     st.header("Local Commands")
     st.code("ollama serve\nollama pull qwen2.5-coder\nuvicorn app.main:app --reload\nstreamlit run dashboard/app.py")
@@ -404,11 +454,11 @@ if run_id:
 
         agent_cols = st.columns(4)
         for index, agent_name in enumerate(AGENT_ORDER):
-            with agent_cols[index]:
+            with agent_cols[index % 4]:
                 st.markdown(status_card(agent_name, statuses.get(agent_name, "idle")), unsafe_allow_html=True)
 
-        log_tab, file_tab, message_tab, memory_tab, eval_tab = st.tabs(
-            ["Live Activity Log", "Generated Files", "Agent Messages", "Memory & Context", "Evaluation"]
+        log_tab, file_tab, message_tab, memory_tab, eval_tab, os_tab = st.tabs(
+            ["Live Activity Log", "Generated Files", "Agent Messages", "Memory & Context", "Evaluation", "Agentic OS"]
         )
         with log_tab:
             render_logs(detail["logs"])
@@ -500,6 +550,46 @@ if run_id:
                 )
             else:
                 st.info("Evaluation scores appear after the Tester Agent runs.")
+
+        with os_tab:
+            if os_capabilities:
+                control_loop = os_capabilities.get("control_loop", {})
+                st.markdown("#### Control Loop Policy")
+                st.json(control_loop)
+
+                st.markdown("#### Agent Catalog")
+                st.dataframe(
+                    [
+                        {
+                            "agent": agent.get("name"),
+                            "implemented": agent.get("implemented"),
+                            "parallel_safe": agent.get("parallel_safe"),
+                            "skills": ", ".join(agent.get("default_skills", [])),
+                            "tools": ", ".join(agent.get("allowed_tools", [])),
+                        }
+                        for agent in os_capabilities.get("agents", [])
+                    ],
+                    width="stretch",
+                    hide_index=True,
+                )
+
+                st.markdown("#### Tool Permissions")
+                st.dataframe(
+                    [
+                        {
+                            "tool": tool.get("name"),
+                            "risk": tool.get("risk"),
+                            "approval": tool.get("requires_approval"),
+                            "timeout": tool.get("timeout_seconds"),
+                            "mcp": tool.get("mcp_compatible"),
+                        }
+                        for tool in os_capabilities.get("tools", [])
+                    ],
+                    width="stretch",
+                    hide_index=True,
+                )
+            else:
+                st.info("Agentic OS capabilities are unavailable.")
 
         if detail.get("error"):
             st.error(detail["error"])
