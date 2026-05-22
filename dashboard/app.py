@@ -2,6 +2,7 @@ import os
 import json
 import time
 from datetime import datetime
+from html import escape
 
 import requests
 import streamlit as st
@@ -48,13 +49,100 @@ st.set_page_config(page_title="Mission Control", layout="wide")
 st.markdown(
     """
     <style>
-      .block-container { padding-top: 1.4rem; max-width: 1280px; }
-      .agent-card {
-        border: 1px solid #d5dbe3;
+      :root {
+        --mc-ink: #111827;
+        --mc-muted: #667085;
+        --mc-line: #d7dde7;
+        --mc-panel: #ffffff;
+        --mc-soft: #f6f8fb;
+        --mc-blue: #2563eb;
+        --mc-green: #047857;
+        --mc-red: #b91c1c;
+        --mc-amber: #b7791f;
+      }
+      .stApp { background: #f5f7fb; }
+      .block-container { padding-top: 1.1rem; max-width: 1360px; }
+      div[data-testid="stSidebarContent"] {
+        background: #ffffff;
+        border-right: 1px solid #dde3ec;
+      }
+      h1, h2, h3 { letter-spacing: 0; color: var(--mc-ink); }
+      .mc-topbar {
+        border: 1px solid var(--mc-line);
         border-radius: 8px;
-        padding: 0.85rem;
-        background: #fbfcfe;
-        min-height: 108px;
+        padding: 1rem 1.15rem;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+        margin-bottom: 1rem;
+      }
+      .mc-title {
+        font-size: 1.55rem;
+        line-height: 1.2;
+        font-weight: 800;
+        color: var(--mc-ink);
+      }
+      .mc-subtitle {
+        margin-top: 0.25rem;
+        color: var(--mc-muted);
+        font-size: 0.92rem;
+      }
+      .mc-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        border: 1px solid var(--mc-line);
+        border-radius: 999px;
+        padding: 0.22rem 0.55rem;
+        font-size: 0.78rem;
+        font-weight: 700;
+        background: #ffffff;
+        color: #344054;
+        white-space: nowrap;
+      }
+      .mc-pill.success { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
+      .mc-pill.warning { border-color: #fde68a; background: #fffbeb; color: #92400e; }
+      .mc-pill.error { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+      .mc-dot { width: 0.48rem; height: 0.48rem; border-radius: 999px; display: inline-block; background: currentColor; }
+      .mc-panel {
+        border: 1px solid var(--mc-line);
+        border-radius: 8px;
+        background: var(--mc-panel);
+        padding: 0.95rem;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+        min-height: 100%;
+      }
+      .mc-section-title {
+        font-size: 0.92rem;
+        font-weight: 800;
+        color: var(--mc-ink);
+        margin-bottom: 0.2rem;
+      }
+      .mc-section-subtitle {
+        font-size: 0.82rem;
+        color: var(--mc-muted);
+        margin-bottom: 0.65rem;
+      }
+      .mc-kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.65rem;
+        margin: 0.7rem 0 1rem 0;
+      }
+      .mc-kpi {
+        border: 1px solid var(--mc-line);
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 0.72rem 0.8rem;
+      }
+      .mc-kpi-label { color: var(--mc-muted); font-size: 0.76rem; font-weight: 700; }
+      .mc-kpi-value { color: var(--mc-ink); font-size: 1.12rem; font-weight: 800; margin-top: 0.15rem; }
+      .agent-card {
+        border: 1px solid #d9e0ea;
+        border-radius: 8px;
+        padding: 0.8rem;
+        background: #ffffff;
+        min-height: 112px;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
       }
       .agent-name { font-weight: 700; color: #111827; font-size: 0.98rem; }
       .agent-role { color: #5b6472; font-size: 0.82rem; margin-top: 0.15rem; }
@@ -66,7 +154,7 @@ st.markdown(
         font-size: 0.85rem;
         font-weight: 600;
       }
-      .status-dot { width: 0.65rem; height: 0.65rem; border-radius: 999px; display: inline-block; }
+      .status-dot { width: 0.62rem; height: 0.62rem; border-radius: 999px; display: inline-block; box-shadow: 0 0 0 3px rgba(37,99,235,0.08); }
       .stage-row {
         display: grid;
         grid-template-columns: repeat(8, minmax(0, 1fr));
@@ -76,14 +164,28 @@ st.markdown(
       .stage {
         border: 1px solid #d5dbe3;
         border-radius: 8px;
-        padding: 0.6rem;
+        padding: 0.58rem 0.45rem;
         text-align: center;
-        font-size: 0.86rem;
+        font-size: 0.82rem;
         background: #ffffff;
+        min-height: 58px;
       }
       .stage.active { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; font-weight: 700; }
       .stage.done { border-color: #047857; background: #ecfdf5; color: #047857; font-weight: 700; }
-      .small-muted { color: #6b7280; font-size: 0.85rem; }
+      .small-muted { color: #6b7280; font-size: 0.76rem; }
+      .mc-run-card {
+        border: 1px solid var(--mc-line);
+        border-radius: 8px;
+        padding: 0.65rem 0.72rem;
+        background: #ffffff;
+        margin-bottom: 0.45rem;
+      }
+      .mc-run-title { font-weight: 800; color: var(--mc-ink); font-size: 0.9rem; }
+      .mc-run-meta { color: var(--mc-muted); font-size: 0.78rem; margin-top: 0.12rem; }
+      @media (max-width: 900px) {
+        .mc-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .stage-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -106,6 +208,7 @@ def get_providers() -> dict:
     data = api_request("GET", "/api/providers")
     if not data:
         return {
+            "api_connected": False,
             "default_provider": "ollama",
             "default_model": "qwen2.5-coder",
             "options": [
@@ -127,7 +230,7 @@ def get_providers() -> dict:
             "model_recommendations": [],
             "message": "Mission Control API is unavailable.",
         }
-    return data
+    return {**data, "api_connected": True}
 
 
 def get_os_capabilities() -> dict:
@@ -156,6 +259,63 @@ def unique_models(models: list[str]) -> list[str]:
     return ordered
 
 
+def status_tone(status: str) -> str:
+    if status in {"completed", "success", "online", "connected", "adapter-ready"}:
+        return "success"
+    if status in {"failed", "error", "offline", "unavailable"}:
+        return "error"
+    if status in {"running", "thinking", "working", "waiting_approval", "warning"}:
+        return "warning"
+    return ""
+
+
+def status_pill(label: str, status: str) -> str:
+    tone = status_tone(status)
+    return (
+        f'<span class="mc-pill {tone}">'
+        f'<span class="mc-dot"></span>{escape(label)}: {escape(status)}</span>'
+    )
+
+
+def topbar_html(providers: dict, os_capabilities: dict) -> str:
+    api_status = "connected" if providers.get("api_connected") else "offline"
+    ollama_status = "online" if providers.get("ollama_running") else "offline"
+    os_status = os_capabilities.get("mcp", {}).get("status", "unavailable") if os_capabilities else "unavailable"
+    return f"""
+    <div class="mc-topbar">
+      <div style="display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
+        <div>
+          <div class="mc-title">Mission Control</div>
+          <div class="mc-subtitle">Agentic OS dashboard for planning, building, testing, reviewing, and deploying local-first software runs.</div>
+        </div>
+        <div style="display:flex; gap:0.45rem; flex-wrap:wrap; justify-content:flex-end;">
+          {status_pill("API", api_status)}
+          {status_pill("Ollama", ollama_status)}
+          {status_pill("MCP", os_status)}
+        </div>
+      </div>
+    </div>
+    """
+
+
+def kpi_strip_html(detail: dict, statuses: dict[str, str], progress_value: int) -> str:
+    completed = sum(1 for value in statuses.values() if value == "completed")
+    failed = sum(1 for value in statuses.values() if value == "failed")
+    evaluations = detail.get("evaluations") or []
+    latest_eval = evaluations[-1] if evaluations else None
+    quality = "pending"
+    if latest_eval:
+        quality = "pass" if latest_eval.get("passed") else "review"
+    return f"""
+    <div class="mc-kpi-grid">
+      <div class="mc-kpi"><div class="mc-kpi-label">Run Status</div><div class="mc-kpi-value">{escape(detail.get("status", "unknown"))}</div></div>
+      <div class="mc-kpi"><div class="mc-kpi-label">Progress</div><div class="mc-kpi-value">{progress_value}%</div></div>
+      <div class="mc-kpi"><div class="mc-kpi-label">Agents Done</div><div class="mc-kpi-value">{completed}/{len(AGENT_ORDER)}</div></div>
+      <div class="mc-kpi"><div class="mc-kpi-label">Quality Gate</div><div class="mc-kpi-value">{quality}{f" / {failed} failed" if failed else ""}</div></div>
+    </div>
+    """
+
+
 def status_card(agent_name: str, status: str) -> str:
     color = STATUS_COLORS.get(status, "#6b7280")
     role = {
@@ -168,13 +328,14 @@ def status_card(agent_name: str, status: str) -> str:
         "Evaluator Agent": "Quality gate decision",
         "Deployment Agent": "Docker and local deploy",
     }.get(agent_name, "Agent")
+    tone = status_tone(status)
     return f"""
-    <div class="agent-card">
+    <div class="agent-card" style="border-top: 3px solid {color};">
       <div class="agent-name">{agent_name}</div>
       <div class="agent-role">{role}</div>
       <div class="agent-status">
         <span class="status-dot" style="background:{color}"></span>
-        {status}
+        <span class="mc-pill {tone}">{status}</span>
       </div>
     </div>
     """
@@ -300,11 +461,10 @@ ollama_models = providers.get("ollama_models", [])
 detected_ollama_model = providers.get("detected_model")
 model_recommendations = providers.get("model_recommendations", [])
 
-st.title("Mission Control")
-st.caption("Human-managed AI software team running locally first with Ollama.")
+st.markdown(topbar_html(providers, os_capabilities), unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("LLM Provider")
+    st.markdown("### LLM Provider")
     provider = st.selectbox(
         "Provider",
         provider_ids,
@@ -348,7 +508,7 @@ with st.sidebar:
                 f"{recommendation['reason']}"
             )
     st.divider()
-    st.header("Agentic OS")
+    st.markdown("### Agentic OS")
     if os_capabilities:
         control_loop = os_capabilities.get("control_loop", {})
         st.caption(
@@ -365,7 +525,7 @@ with st.sidebar:
     else:
         st.caption("OS capability endpoint unavailable.")
     st.divider()
-    st.header("Local Commands")
+    st.markdown("### Local Commands")
     st.code("ollama serve\nollama pull qwen2.5-coder\nuvicorn app.main:app --reload\nstreamlit run dashboard/app.py")
 
 if "current_run_id" not in st.session_state:
@@ -375,7 +535,15 @@ recent_runs = api_request("GET", "/api/runs", params={"limit": 20}) or []
 
 left, right = st.columns([1.05, 0.95])
 with left:
-    st.subheader("Manager Requirement")
+    st.markdown(
+        """
+        <div class="mc-panel">
+          <div class="mc-section-title">Manager Requirement</div>
+          <div class="mc-section-subtitle">Describe the software outcome. Guardrails will check that it is actionable before agents start.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     requirement = st.text_area(
         "What should the team build?",
         height=180,
@@ -398,8 +566,31 @@ with left:
                 st.rerun()
 
 with right:
-    st.subheader("Recent Runs")
+    st.markdown(
+        """
+        <div class="mc-panel">
+          <div class="mc-section-title">Recent Runs</div>
+          <div class="mc-section-subtitle">Open a previous run to inspect artifacts, memory, traces, and evaluations.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     if recent_runs:
+        for run in recent_runs[:3]:
+            st.markdown(
+                f"""
+                <div class="mc-run-card">
+                  <div style="display:flex; justify-content:space-between; gap:0.5rem; align-items:center;">
+                    <div>
+                      <div class="mc-run-title">Run {run["id"]}</div>
+                      <div class="mc-run-meta">{escape(run["current_stage"])} | {format_time(run["created_at"])}</div>
+                    </div>
+                    {status_pill("status", run["status"])}
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
         run_ids = [run["id"] for run in recent_runs]
         current_run_id = st.session_state.get("current_run_id")
         selected_index = run_ids.index(current_run_id) if current_run_id in run_ids else 0
@@ -421,7 +612,23 @@ if run_id:
     detail = api_request("GET", f"/api/runs/{run_id}")
     if detail:
         st.divider()
-        st.subheader(f"Run {detail['id']} Control")
+        st.markdown(
+            f"""
+            <div class="mc-panel">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap;">
+                <div>
+                  <div class="mc-section-title">Run {detail['id']} Control</div>
+                  <div class="mc-section-subtitle">{escape(detail.get("current_stage", "unknown"))} | {escape(detail.get("provider", "unknown"))} / {escape(detail.get("model", "unknown"))}</div>
+                </div>
+                <div style="display:flex; gap:0.45rem; flex-wrap:wrap;">
+                  {status_pill("run", detail.get("status", "unknown"))}
+                  {status_pill("stage", detail.get("current_stage", "unknown"))}
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         statuses = {row["agent_name"]: row["status"] for row in detail["statuses"]}
 
         control_cols = st.columns([1, 1, 1, 2])
@@ -449,6 +656,7 @@ if run_id:
             )
 
         progress_value, progress_label = workflow_progress(detail, statuses)
+        st.markdown(kpi_strip_html(detail, statuses, progress_value), unsafe_allow_html=True)
         st.progress(progress_value, text=f"{progress_label} - {progress_value}%")
         st.markdown(progress_html(detail, statuses), unsafe_allow_html=True)
 
