@@ -50,33 +50,88 @@ st.markdown(
     """
     <style>
       :root {
-        --mc-ink: #111827;
-        --mc-muted: #667085;
-        --mc-line: #d7dde7;
-        --mc-panel: #ffffff;
-        --mc-soft: #f6f8fb;
-        --mc-blue: #2563eb;
+        --mc-ink: #0b2230;
+        --mc-muted: #526c78;
+        --mc-line: rgba(169, 205, 218, 0.72);
+        --mc-panel: rgba(247, 252, 255, 0.84);
+        --mc-panel-strong: rgba(255, 255, 255, 0.94);
+        --mc-soft: rgba(220, 244, 248, 0.74);
+        --mc-sky: #93cfee;
+        --mc-lake: #147fa3;
+        --mc-water: #27b8bd;
+        --mc-aqua: #8ee6db;
+        --mc-snow: #f7fcff;
+        --mc-granite: #5f747c;
+        --mc-blue: #147fa3;
+        --mc-teal: #27b8bd;
         --mc-green: #047857;
-        --mc-red: #b91c1c;
+        --mc-red: #b42318;
         --mc-amber: #b7791f;
+        --mc-shadow: 0 18px 55px rgba(5, 37, 55, 0.17);
       }
-      .stApp { background: #f5f7fb; }
-      .block-container { padding-top: 1.1rem; max-width: 1360px; }
+      .stApp {
+        background:
+          linear-gradient(180deg, #93cfee 0%, #b8e2f3 34%, #43bfd0 58%, #147fa3 100%);
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+        color: var(--mc-ink);
+      }
+      .stApp::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background:
+          radial-gradient(circle at 18% 8%, rgba(247, 252, 255, 0.78), transparent 27rem),
+          radial-gradient(circle at 86% 82%, rgba(142, 230, 219, 0.44), transparent 28rem),
+          linear-gradient(180deg, rgba(255,255,255,0.22), rgba(9, 47, 66, 0.26));
+        z-index: 0;
+      }
+      .stApp > header { background: transparent; }
+      .block-container {
+        position: relative;
+        z-index: 1;
+        padding-top: 1.15rem;
+        padding-bottom: 2.5rem;
+        max-width: 1380px;
+      }
       div[data-testid="stSidebarContent"] {
-        background: #ffffff;
-        border-right: 1px solid #dde3ec;
+        background: rgba(247, 252, 255, 0.86);
+        border-right: 1px solid rgba(255, 255, 255, 0.55);
+        box-shadow: 18px 0 60px rgba(10, 45, 63, 0.14);
+        backdrop-filter: blur(22px) saturate(140%);
       }
       h1, h2, h3 { letter-spacing: 0; color: var(--mc-ink); }
+      div[data-testid="stVerticalBlockBorderWrapper"],
+      div[data-testid="stExpander"] {
+        background: rgba(255, 255, 255, 0.76);
+        backdrop-filter: blur(16px);
+      }
+      .stTextArea textarea,
+      .stTextInput input,
+      .stSelectbox [data-baseweb="select"] {
+        border-radius: 8px;
+        border-color: rgba(172, 198, 211, 0.9);
+        background: rgba(255, 255, 255, 0.88);
+      }
+      .stButton > button {
+        border-radius: 8px;
+        border: 1px solid rgba(20, 127, 163, 0.32);
+        box-shadow: 0 8px 24px rgba(10, 74, 101, 0.10);
+      }
       .mc-topbar {
         border: 1px solid var(--mc-line);
         border-radius: 8px;
-        padding: 1rem 1.15rem;
-        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+        padding: 1.05rem 1.15rem;
+        background:
+          linear-gradient(135deg, rgba(247, 252, 255, 0.94) 0%, rgba(220, 244, 248, 0.82) 58%, rgba(142, 230, 219, 0.56) 100%);
+        box-shadow: var(--mc-shadow);
         margin-bottom: 1rem;
+        backdrop-filter: blur(20px) saturate(140%);
       }
       .mc-title {
-        font-size: 1.55rem;
+        font-size: 1.6rem;
         line-height: 1.2;
         font-weight: 800;
         color: var(--mc-ink);
@@ -85,6 +140,7 @@ st.markdown(
         margin-top: 0.25rem;
         color: var(--mc-muted);
         font-size: 0.92rem;
+        max-width: 760px;
       }
       .mc-pill {
         display: inline-flex;
@@ -92,15 +148,16 @@ st.markdown(
         gap: 0.35rem;
         border: 1px solid var(--mc-line);
         border-radius: 999px;
-        padding: 0.22rem 0.55rem;
+        padding: 0.24rem 0.62rem;
         font-size: 0.78rem;
         font-weight: 700;
-        background: #ffffff;
-        color: #344054;
+        background: rgba(255, 255, 255, 0.74);
+        color: #234554;
         white-space: nowrap;
+        backdrop-filter: blur(12px);
       }
       .mc-pill.success { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
-      .mc-pill.warning { border-color: #fde68a; background: #fffbeb; color: #92400e; }
+      .mc-pill.warning { border-color: #f8d989; background: #fff9e8; color: #8a5b12; }
       .mc-pill.error { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
       .mc-dot { width: 0.48rem; height: 0.48rem; border-radius: 999px; display: inline-block; background: currentColor; }
       .mc-panel {
@@ -108,8 +165,9 @@ st.markdown(
         border-radius: 8px;
         background: var(--mc-panel);
         padding: 0.95rem;
-        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+        box-shadow: 0 12px 36px rgba(9, 52, 72, 0.12);
         min-height: 100%;
+        backdrop-filter: blur(18px) saturate(135%);
       }
       .mc-section-title {
         font-size: 0.92rem;
@@ -131,21 +189,24 @@ st.markdown(
       .mc-kpi {
         border: 1px solid var(--mc-line);
         border-radius: 8px;
-        background: #ffffff;
+        background: rgba(255, 255, 255, 0.82);
         padding: 0.72rem 0.8rem;
+        box-shadow: 0 10px 28px rgba(7, 50, 72, 0.10);
+        backdrop-filter: blur(14px);
       }
       .mc-kpi-label { color: var(--mc-muted); font-size: 0.76rem; font-weight: 700; }
       .mc-kpi-value { color: var(--mc-ink); font-size: 1.12rem; font-weight: 800; margin-top: 0.15rem; }
       .agent-card {
-        border: 1px solid #d9e0ea;
+        border: 1px solid rgba(203, 222, 232, 0.82);
         border-radius: 8px;
         padding: 0.8rem;
-        background: #ffffff;
+        background: linear-gradient(180deg, rgba(247, 252, 255, 0.88), rgba(236, 249, 251, 0.80));
         min-height: 112px;
-        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+        box-shadow: 0 12px 32px rgba(10, 53, 72, 0.12);
+        backdrop-filter: blur(16px);
       }
       .agent-name { font-weight: 700; color: #111827; font-size: 0.98rem; }
-      .agent-role { color: #5b6472; font-size: 0.82rem; margin-top: 0.15rem; }
+      .agent-role { color: var(--mc-granite); font-size: 0.82rem; margin-top: 0.15rem; }
       .agent-status {
         margin-top: 0.75rem;
         display: inline-flex;
@@ -162,26 +223,54 @@ st.markdown(
         margin: 0.4rem 0 1rem 0;
       }
       .stage {
-        border: 1px solid #d5dbe3;
+        border: 1px solid rgba(202, 221, 232, 0.85);
         border-radius: 8px;
         padding: 0.58rem 0.45rem;
         text-align: center;
         font-size: 0.82rem;
-        background: #ffffff;
+        background: rgba(247, 252, 255, 0.78);
         min-height: 58px;
+        box-shadow: 0 8px 22px rgba(9, 51, 70, 0.10);
+        backdrop-filter: blur(14px);
       }
-      .stage.active { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; font-weight: 700; }
-      .stage.done { border-color: #047857; background: #ecfdf5; color: #047857; font-weight: 700; }
+      .stage.active { border-color: #27b8bd; background: rgba(220, 244, 248, 0.94); color: #075f73; font-weight: 700; }
+      .stage.done { border-color: #43c7a7; background: rgba(226, 252, 245, 0.94); color: #047857; font-weight: 700; }
       .small-muted { color: #6b7280; font-size: 0.76rem; }
       .mc-run-card {
         border: 1px solid var(--mc-line);
         border-radius: 8px;
         padding: 0.65rem 0.72rem;
-        background: #ffffff;
+        background: linear-gradient(180deg, rgba(247, 252, 255, 0.84), rgba(232, 248, 251, 0.76));
         margin-bottom: 0.45rem;
+        box-shadow: 0 8px 24px rgba(10, 53, 72, 0.10);
+        backdrop-filter: blur(14px);
       }
       .mc-run-title { font-weight: 800; color: var(--mc-ink); font-size: 0.9rem; }
       .mc-run-meta { color: var(--mc-muted); font-size: 0.78rem; margin-top: 0.12rem; }
+      div[data-testid="stTabs"] [role="tablist"] {
+        gap: 0.35rem;
+        border-bottom: 0;
+      }
+      div[data-testid="stTabs"] [role="tab"] {
+        border-radius: 8px;
+        border: 1px solid rgba(205, 224, 234, 0.86);
+        background: rgba(255, 255, 255, 0.72);
+        color: #254a58;
+      }
+      div[data-testid="stTabs"] [aria-selected="true"] {
+        background: rgba(220, 244, 248, 0.98);
+        color: #075f73;
+        border-color: rgba(39, 184, 189, 0.72);
+      }
+      div[data-testid="stDataFrame"],
+      div[data-testid="stCodeBlock"] {
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 12px 32px rgba(8, 45, 63, 0.10);
+      }
+      .stProgress > div > div > div > div {
+        background: linear-gradient(90deg, #147fa3, #27b8bd, #8ee6db);
+      }
       @media (max-width: 900px) {
         .mc-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .stage-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
