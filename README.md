@@ -9,7 +9,7 @@ Agents:
 - Tester Agent
 - Deployment Agent
 
-Default stack: Ollama, FastAPI, Streamlit, LangChain, LangGraph, and SQLite.
+Default stack: Ollama, FastAPI, React/Vite, LangChain, LangGraph, and SQLite.
 
 The project is now being refactored toward an Agentic OS: a local-first platform for multi-agent orchestration, skills, tools, memory, guardrails, evaluation, observability, and MCP-compatible integrations.
 
@@ -37,16 +37,24 @@ Start the API:
 uvicorn app.main:app --reload
 ```
 
-Start the dashboard in another terminal:
+Install and start the React dashboard in another terminal:
 
 ```bash
-streamlit run dashboard/app.py
+cd frontend
+npm install
+npm run dev
 ```
 
 Open:
 
-- Dashboard: http://localhost:8501
+- Dashboard: http://localhost:3000
 - API health: http://localhost:8000/health
+
+The previous Streamlit dashboard is still available for compatibility:
+
+```bash
+streamlit run dashboard/app.py
+```
 
 You can also use:
 
@@ -66,7 +74,7 @@ Requirements:
 - Player chooses rock, paper, or scissors.
 - Backend randomly chooses computer move.
 - Return winner, player move, and computer move.
-- Streamlit frontend with three buttons: Rock, Paper, Scissors.
+- Frontend with three buttons: Rock, Paper, Scissors.
 - Show round result.
 - Tester writes API tests.
 - Deployment Agent creates Docker/local run files.
@@ -127,6 +135,12 @@ cp .env.example .env
 docker compose up --build
 docker compose exec ollama ollama pull qwen2.5-coder
 ```
+
+Docker Compose starts:
+
+- React dashboard: http://localhost:3000
+- Legacy Streamlit dashboard: http://localhost:8501
+- FastAPI backend: http://localhost:8000
 
 ## More Documentation
 

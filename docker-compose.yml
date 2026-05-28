@@ -23,6 +23,17 @@ services:
       - ollama
 
   dashboard:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    environment:
+      VITE_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  streamlit-dashboard:
     build: .
     command: streamlit run dashboard/app.py --server.address 0.0.0.0 --server.port 8501
     env_file:

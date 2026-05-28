@@ -9,5 +9,5 @@ cleanup() {
 }
 trap cleanup EXIT
 
-streamlit run dashboard/app.py
-
+cd frontend
+npm run dev
