@@ -98,7 +98,7 @@ button:disabled {
   position: sticky;
   top: 0;
   height: 100vh;
-  padding: 24px;
+  padding: 20px;
   background: rgba(255, 255, 255, 0.72);
   border-right: 1px solid rgba(142, 144, 162, 0.18);
   backdrop-filter: blur(22px);
@@ -110,7 +110,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 32px;
+  margin-bottom: 22px;
 }
 
 .brand-mark {
@@ -142,12 +142,32 @@ button:disabled {
 }
 
 .side-section {
-  margin-bottom: 28px;
+  margin-bottom: 22px;
 }
 
 .side-section h3 {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 14px;
+}
+
+.side-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.side-section-head span {
+  min-width: 28px;
+  border: 1px solid #e0e2ec;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #697386;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+  padding: 3px 8px;
 }
 
 label {
@@ -209,6 +229,26 @@ textarea {
 .run-list {
   display: grid;
   gap: 8px;
+  max-height: min(38vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.run-list::-webkit-scrollbar,
+.list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.run-list::-webkit-scrollbar-thumb,
+.list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #c9c4dc;
+}
+
+.run-list::-webkit-scrollbar-track,
+.list::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .run-item,
@@ -247,13 +287,18 @@ textarea {
 }
 
 .content {
-  padding: 26px clamp(20px, 4vw, 56px) 56px;
+  padding: 20px clamp(20px, 4vw, 56px) 48px;
 }
 
 .hero {
-  max-width: 760px;
-  margin: 56px auto 54px;
-  text-align: center;
+  max-width: 1120px;
+  min-height: 96px;
+  margin: 0 auto 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  text-align: left;
   animation: pageRise 640ms ease both;
 }
 
@@ -271,18 +316,37 @@ textarea {
 }
 
 .hero h1 {
-  margin: 18px 0 14px;
-  font-size: clamp(42px, 6vw, 72px);
-  line-height: 0.98;
-  letter-spacing: -0.07em;
+  margin: 10px 0 0;
+  font-size: clamp(34px, 4vw, 52px);
+  line-height: 1;
+  letter-spacing: -0.06em;
 }
 
-.hero p {
-  max-width: 650px;
-  margin: 0 auto;
+.hero-note {
+  width: min(340px, 38vw);
+  align-self: flex-start;
+  border: 1px solid #e0e2ec;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 14px 16px;
+  box-shadow: 0 14px 34px rgba(31, 36, 56, 0.08);
+}
+
+.hero-note strong,
+.hero-note span {
+  display: block;
+}
+
+.hero-note strong {
+  font-size: 13px;
+  letter-spacing: -0.01em;
+}
+
+.hero-note span {
+  margin-top: 4px;
   color: #5f6678;
-  font-size: 18px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .notice {
@@ -684,6 +748,14 @@ pre {
     height: auto;
   }
 
+  .run-list {
+    max-height: 260px;
+  }
+
+  .hero {
+    align-items: flex-start;
+  }
+
   .grid.two,
   .split {
     grid-template-columns: 1fr;
@@ -705,11 +777,18 @@ pre {
   }
 
   .hero {
-    margin: 28px auto 32px;
+    min-height: auto;
+    margin: 8px auto 20px;
+    display: block;
   }
 
   .hero h1 {
-    font-size: 42px;
+    font-size: 36px;
+  }
+
+  .hero-note {
+    width: 100%;
+    margin-top: 12px;
   }
 
   .agents,

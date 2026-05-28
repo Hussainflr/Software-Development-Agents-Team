@@ -225,10 +225,7 @@ export function App() {
 
   const refreshRuns = () => {
     api<Run[]>("/api/runs?limit=20")
-      .then((data) => {
-        setRuns(data);
-        setSelectedRunId((current) => current ?? data[0]?.id ?? null);
-      })
+      .then((data) => setRuns(data))
       .catch((error) => setNotice(error.message));
   };
 
@@ -236,6 +233,9 @@ export function App() {
 
   useEffect(() => {
     if (!selectedRunId) return;
+    setTab("logs");
+    setSelectedFile("");
+    setSelectedContext(null);
     let cancelled = false;
     const load = () => {
       api<RunDetail>(`/api/runs/${selectedRunId}`)
@@ -288,6 +288,7 @@ export function App() {
         method: "POST",
         body: JSON.stringify({ requirement, provider, model }),
       });
+      setTab("logs");
       setSelectedRunId(created.id);
       refreshRuns();
     } catch (error) {
@@ -347,14 +348,20 @@ export function App() {
           ) : null}
         </section>
 
-        <section className="side-section">
-          <h3>Recent runs</h3>
+        <section className="side-section recent-runs-section">
+          <div className="side-section-head">
+            <h3>Recent runs</h3>
+            <span>{runs.length}</span>
+          </div>
           <div className="run-list">
             {runs.map((run) => (
               <button
                 className={`run-item ${run.id === selectedRunId ? "active" : ""}`}
                 key={run.id}
-                onClick={() => setSelectedRunId(run.id)}
+                onClick={() => {
+                  setTab("logs");
+                  setSelectedRunId(run.id);
+                }}
               >
                 <span>Run {run.id}</span>
                 <small>{run.current_stage} · {formatTime(run.created_at)}</small>
@@ -366,9 +373,14 @@ export function App() {
 
       <section className="content">
         <header className="hero">
-          <span className="eyebrow">Local-first AI software team</span>
-          <h1>Build, review, test, and deploy with a coordinated agent team.</h1>
-          <p>Plan the requirement, track every specialist, inspect artifacts, and approve deployment from one focused workspace.</p>
+          <div>
+            <span className="eyebrow">Local-first AI software team</span>
+            <h1>Mission Control</h1>
+          </div>
+          <div className="hero-note">
+            <strong>Clean workspace</strong>
+            <span>Start a new run or open one from Recent runs when you are ready.</span>
+          </div>
         </header>
 
         {notice ? <div className="notice">{notice}</div> : null}
@@ -428,7 +440,7 @@ export function App() {
             ))}
           </nav>
 
-          {tab === "logs" ? <Logs logs={detail?.logs ?? []} /> : null}
+          {tab === "logs" ? <Logs logs={detail?.logs ?? []} hasRun={Boolean(detail)} /> : null}
           {tab === "files" ? (
             <div className="split">
               <div className="list">
@@ -485,8 +497,9 @@ function AgentCard({ name, status }: { name: string; status: string }) {
   );
 }
 
-function Logs({ logs }: { logs: Log[] }) {
-  if (!logs.length) return <div className="empty">No activity yet.</div>;
+function Logs({ logs, hasRun }: { logs: Log[]; hasRun: boolean }) {
+  if (!hasRun) return <div className="empty">No run selected. Logs will appear after you start or open a run.</div>;
+  if (!logs.length) return <div className="empty">This run has no activity yet.</div>;
   return (
     <div className="table">
       {logs.slice(-80).reverse().map((log) => (
