@@ -13,6 +13,14 @@ const AGENTS = [
   "Deployment Agent",
 ];
 
+const EXAMPLE_PROMPTS = [
+  "Build a FastAPI task tracker with a React dashboard, tests, review, and Docker setup.",
+  "Create a Rock Paper Scissors game with an API endpoint, frontend controls, tests, and deployment files.",
+  "Build a small inventory app with CRUD APIs, a simple UI, validation, tests, and Docker Compose.",
+];
+
+const RUN_FLOW = ["Plan", "Build", "Review", "Test", "Evaluate", "Approve", "Deploy"];
+
 const STAGE_PROGRESS: Record<string, number> = {
   requirement: 5,
   planning: 12,
@@ -388,97 +396,134 @@ export function App() {
         <section className="grid two">
           <form className="panel requirement-panel" onSubmit={startRun}>
             <div className="section-head">
-              <span>Manager input</span>
-              <strong>New run</strong>
+              <span>{detail ? "Manager input" : "Ready to build"}</span>
+              <strong>{detail ? "New run" : "Describe the outcome"}</strong>
             </div>
             <textarea
               value={requirement}
               onChange={(event) => setRequirement(event.target.value)}
               placeholder="Build a FastAPI task tracker with a React dashboard, tests, review, and Docker setup."
             />
+            <div className="examples">
+              <span>Try one:</span>
+              {EXAMPLE_PROMPTS.map((example) => (
+                <button key={example} type="button" onClick={() => setRequirement(example)}>
+                  {example}
+                </button>
+              ))}
+            </div>
             <button className="primary" disabled={busy || !requirement.trim()}>
               {busy ? "Starting..." : "Start Run"}
             </button>
           </form>
 
           <section className="panel featured-run">
-            <div className="section-head">
-              <span>Active run</span>
-              <strong>{detail ? `Run ${detail.id}` : "No run selected"}</strong>
-            </div>
-            <div className="progress-card">
-              <div>
-                <strong>{progress.label}</strong>
-                <span>{progress.value}% complete</span>
+            {detail ? (
+              <>
+                <div className="section-head">
+                  <span>Active run</span>
+                  <strong>Run {detail.id}</strong>
+                </div>
+                <div className="progress-card">
+                  <div>
+                    <strong>{progress.label}</strong>
+                    <span>{progress.value}% complete</span>
+                  </div>
+                  <div className="progress-track"><div style={{ width: `${progress.value}%` }} /></div>
+                </div>
+                <div className="kpis">
+                  <Metric label="Status" value={detail.status} />
+                  <Metric label="Stage" value={detail.current_stage} />
+                  <Metric label="Agents done" value={`${Object.values(statuses).filter((item) => item === "completed").length}/${AGENTS.length}`} />
+                  <Metric label="Quality" value={latestEval ? (latestEval.passed ? "pass" : "review") : "pending"} />
+                </div>
+                <div className="actions">
+                  <button disabled={busy || detail.status !== "waiting_approval"} onClick={() => runAction("approve-deployment")}>Approve</button>
+                  <button disabled={busy || !["running", "waiting_approval"].includes(detail.status)} onClick={() => runAction("stop")}>Stop</button>
+                  <button disabled={busy} onClick={() => runAction("restart")}>Restart</button>
+                </div>
+              </>
+            ) : (
+              <div className="launch-guide">
+                <div className="section-head">
+                  <span>How this run works</span>
+                  <strong>Agent workflow</strong>
+                </div>
+                <p>
+                  Submit a requirement and Mission Control will coordinate the specialist agents, keep logs cleanly separated,
+                  and pause before deployment for your approval.
+                </p>
+                <ol>
+                  {RUN_FLOW.map((step) => (
+                    <li key={step}>
+                      <span>{step}</span>
+                    </li>
+                  ))}
+                </ol>
+                <div className="launch-note">
+                  Logs, artifacts, memory, and evaluations stay empty until you start or open a run.
+                </div>
               </div>
-              <div className="progress-track"><div style={{ width: `${progress.value}%` }} /></div>
-            </div>
-            <div className="kpis">
-              <Metric label="Status" value={detail?.status ?? "idle"} />
-              <Metric label="Stage" value={detail?.current_stage ?? "none"} />
-              <Metric label="Agents done" value={`${Object.values(statuses).filter((item) => item === "completed").length}/${AGENTS.length}`} />
-              <Metric label="Quality" value={latestEval ? (latestEval.passed ? "pass" : "review") : "pending"} />
-            </div>
-            <div className="actions">
-              <button disabled={busy || detail?.status !== "waiting_approval"} onClick={() => runAction("approve-deployment")}>Approve</button>
-              <button disabled={busy || !["running", "waiting_approval"].includes(detail?.status ?? "")} onClick={() => runAction("stop")}>Stop</button>
-              <button disabled={busy || !detail} onClick={() => runAction("restart")}>Restart</button>
-            </div>
+            )}
           </section>
         </section>
 
-        <section className="agents">
-          {AGENTS.map((agent) => <AgentCard key={agent} name={agent} status={statuses[agent] ?? "idle"} />)}
-        </section>
+        {detail ? (
+          <>
+            <section className="agents">
+              {AGENTS.map((agent) => <AgentCard key={agent} name={agent} status={statuses[agent] ?? "idle"} />)}
+            </section>
 
-        <section className="panel workspace" key={tab}>
-          <nav className="tabs">
-            {["logs", "files", "messages", "memory", "evaluation"].map((item) => (
-              <button className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>
-                {item}
-              </button>
-            ))}
-          </nav>
-
-          {tab === "logs" ? <Logs logs={detail?.logs ?? []} hasRun={Boolean(detail)} /> : null}
-          {tab === "files" ? (
-            <div className="split">
-              <div className="list">
-                {(detail?.files ?? []).map((file) => (
-                  <button className={selectedFile === file.path ? "active" : ""} key={file.id} onClick={() => setSelectedFile(file.path)}>
-                    <span>{file.path}</span>
-                    <small>{file.agent_name}</small>
+            <section className="panel workspace" key={tab}>
+              <nav className="tabs">
+                {["logs", "files", "messages", "memory", "evaluation"].map((item) => (
+                  <button className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>
+                    {item}
                   </button>
                 ))}
-              </div>
-              <pre>{selectedFileData?.content ?? "Generated files will appear here."}</pre>
-            </div>
-          ) : null}
-          {tab === "messages" ? <Messages messages={detail?.messages ?? []} /> : null}
-          {tab === "memory" ? (
-            <div className="split">
-              <div>
-                <h3>Short-term memory</h3>
-                <MemoryList items={detail?.short_term_memory ?? []} />
-                <h3>Long-term memory</h3>
-                <MemoryList items={detail?.long_term_memory ?? []} />
-              </div>
-              <div>
-                <h3>Context snapshots</h3>
-                <div className="list">
-                  {(detail?.contexts ?? []).map((context) => (
-                    <button key={context.id} className={selectedContext === context.id ? "active" : ""} onClick={() => setSelectedContext(context.id)}>
-                      <span>{context.agent_name}</span>
-                      <small>{formatTime(context.timestamp)}</small>
-                    </button>
-                  ))}
+              </nav>
+
+              {tab === "logs" ? <Logs logs={detail.logs} hasRun /> : null}
+              {tab === "files" ? (
+                <div className="split">
+                  <div className="list">
+                    {detail.files.map((file) => (
+                      <button className={selectedFile === file.path ? "active" : ""} key={file.id} onClick={() => setSelectedFile(file.path)}>
+                        <span>{file.path}</span>
+                        <small>{file.agent_name}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <pre>{selectedFileData?.content ?? "Generated files will appear here."}</pre>
                 </div>
-                <pre>{selectedContextData?.payload_json ?? "Context snapshots will appear here."}</pre>
-              </div>
-            </div>
-          ) : null}
-          {tab === "evaluation" ? <Evaluations evaluations={detail?.evaluations ?? []} /> : null}
-        </section>
+              ) : null}
+              {tab === "messages" ? <Messages messages={detail.messages} /> : null}
+              {tab === "memory" ? (
+                <div className="split">
+                  <div>
+                    <h3>Short-term memory</h3>
+                    <MemoryList items={detail.short_term_memory} />
+                    <h3>Long-term memory</h3>
+                    <MemoryList items={detail.long_term_memory} />
+                  </div>
+                  <div>
+                    <h3>Context snapshots</h3>
+                    <div className="list">
+                      {detail.contexts.map((context) => (
+                        <button key={context.id} className={selectedContext === context.id ? "active" : ""} onClick={() => setSelectedContext(context.id)}>
+                          <span>{context.agent_name}</span>
+                          <small>{formatTime(context.timestamp)}</small>
+                        </button>
+                      ))}
+                    </div>
+                    <pre>{selectedContextData?.payload_json ?? "Context snapshots will appear here."}</pre>
+                  </div>
+                </div>
+              ) : null}
+              {tab === "evaluation" ? <Evaluations evaluations={detail.evaluations} /> : null}
+            </section>
+          </>
+        ) : null}
       </section>
     </main>
   );
