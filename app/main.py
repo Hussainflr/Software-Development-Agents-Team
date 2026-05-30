@@ -1,10 +1,9 @@
 """Compatibility entrypoint.
 
 Run with:
-    uvicorn app.main:app --reload
+    bash scripts/run_local.sh
 """
 
 from backend.app.main import app
 
 __all__ = ["app"]
-
