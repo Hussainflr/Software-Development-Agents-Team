@@ -36,6 +36,7 @@ const STAGE_PROGRESS: Record<string, number> = {
   deployment: 92,
   completed: 100,
   stopped: 0,
+  interrupted: 0,
 };
 
 type ProviderOption = {
@@ -177,8 +178,8 @@ function logSummary(value: string) {
 
 function statusTone(status: string) {
   if (["completed", "success", "online", "connected"].includes(status)) return "success";
-  if (["failed", "error", "offline", "unavailable", "stopped"].includes(status)) return "danger";
-  if (["running", "thinking", "working", "waiting_approval", "warning"].includes(status)) return "warning";
+  if (["failed", "error", "offline", "unavailable"].includes(status)) return "danger";
+  if (["running", "thinking", "working", "waiting_approval", "warning", "stopped", "interrupted"].includes(status)) return "warning";
   return "neutral";
 }
 
@@ -187,6 +188,7 @@ function progressFor(run: Run | RunDetail | null, statuses: Record<string, strin
   if (run.status === "completed") return { value: 100, label: "Completed" };
   if (run.status === "failed") return { value: Math.max(STAGE_PROGRESS[run.current_stage] ?? 5, 5), label: "Failed" };
   if (run.status === "stopped") return { value: Math.max(STAGE_PROGRESS[run.current_stage] ?? 5, 5), label: "Stopped" };
+  if (run.status === "interrupted") return { value: Math.max(STAGE_PROGRESS[run.current_stage] ?? 5, 5), label: "Interrupted" };
 
   const completedAgents = Object.values(statuses).filter((status) => status === "completed").length;
   const value = Math.min((STAGE_PROGRESS[run.current_stage] ?? 5) + Math.min(completedAgents * 5, 20), 99);
@@ -306,7 +308,7 @@ export function App() {
     }
   }
 
-  async function runAction(action: "approve-deployment" | "stop" | "restart") {
+  async function runAction(action: "approve-deployment" | "stop" | "restart" | "resume") {
     if (!detail) return;
     setBusy(true);
     setNotice("");
@@ -439,6 +441,7 @@ export function App() {
                 </div>
                 <div className="actions">
                   <button disabled={busy || detail.status !== "waiting_approval"} onClick={() => runAction("approve-deployment")}>Approve</button>
+                  <button disabled={busy || !["failed", "stopped", "interrupted"].includes(detail.status)} onClick={() => runAction("resume")}>Resume</button>
                   <button disabled={busy || !["running", "waiting_approval"].includes(detail.status)} onClick={() => runAction("stop")}>Stop</button>
                   <button disabled={busy} onClick={() => runAction("restart")}>Restart</button>
                 </div>

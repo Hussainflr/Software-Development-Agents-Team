@@ -167,7 +167,7 @@ Mission Control shows:
 - Agent messages
 - Memory and context snapshots
 - Evaluation scores
-- Stop, restart, and approve deployment controls
+- Stop, resume, restart, and approve deployment controls
 
 On a fresh dashboard load, no previous run is auto-opened. You can select a run from Recent Runs when you want to inspect history.
 
@@ -186,6 +186,7 @@ GET  /api/runs/{run_id}/status
 GET  /api/runs/{run_id}/outputs
 POST /api/runs/{run_id}/approve-deployment
 POST /api/runs/{run_id}/stop
+POST /api/runs/{run_id}/resume
 POST /api/runs/{run_id}/restart
 ```
 
@@ -287,7 +288,7 @@ ollama pull qwen2.5-coder
 
 If cloud provider buttons are disabled, add the matching key to `.env` and restart FastAPI.
 
-If a previous run appears stuck as `running`, restart FastAPI. Startup marks old active runs as stopped because background threads cannot safely resume across process restarts.
+If a run is stopped, fails, or is interrupted by a FastAPI restart, select it from Recent Runs and click Resume. Mission Control keeps the last stage, existing artifacts, memory, logs, and context snapshots, then continues from that stage instead of starting over.
 
 If generated Python has indentation issues, new runs should be normalized automatically by `tools/artifact_sanitizer.py`.
 

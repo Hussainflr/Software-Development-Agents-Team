@@ -67,7 +67,7 @@ class Repository:
             return list(session.scalars(statement))
 
     def interrupt_active_runs(self) -> int:
-        """Mark runs left active by a previous API process as stopped.
+        """Mark runs left active by a previous API process as interrupted.
 
         Background agent threads are process-local, so a server restart cannot
         safely resume an old ``running`` row without launching duplicate work.
@@ -75,10 +75,9 @@ class Repository:
         with self.session_factory() as session:
             runs = list(session.scalars(select(Run).where(Run.status == "running")))
             for run in runs:
-                run.status = "stopped"
-                run.current_stage = "stopped"
+                run.status = "interrupted"
                 run.stop_requested = True
-                run.error = "Run was interrupted because Mission Control restarted. Use Restart Run to launch it again."
+                run.error = "Run was interrupted because Mission Control restarted. Use Resume Run to continue from this stage."
                 run.updated_at = now_utc()
                 session.add(
                     AgentLog(
@@ -107,7 +106,7 @@ class Repository:
                     )
                 )
                 for status_row in active_statuses:
-                    status_row.status = "failed"
+                    status_row.status = "interrupted"
                     status_row.updated_at = now_utc()
 
             session.commit()

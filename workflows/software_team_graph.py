@@ -26,6 +26,41 @@ from observability.tracing import TraceEvent, TraceRecorder
 from tools.file_writer import write_artifacts
 
 
+INITIAL_STAGE_ORDER = [
+    "planning",
+    "backend",
+    "frontend",
+    "review",
+    "security",
+    "testing",
+    "evaluation",
+]
+
+STAGE_ALIASES = {
+    "requirement": "planning",
+    "planner": "planning",
+    "reviewer": "review",
+    "tester": "testing",
+    "evaluator": "evaluation",
+    "stopped": "planning",
+    "completed": "planning",
+    "deployment_approval": "evaluation",
+    "backend_revision": "backend_revision",
+    "frontend_revision": "frontend_revision",
+}
+
+STAGE_BY_AGENT = {
+    "Planner Agent": "planning",
+    "Backend Agent": "backend",
+    "Frontend Agent": "frontend",
+    "Reviewer Agent": "review",
+    "Security Agent": "security",
+    "Tester Agent": "testing",
+    "Evaluator Agent": "evaluation",
+    "Deployment Agent": "deployment",
+}
+
+
 class SoftwareTeamState(TypedDict, total=False):
     run_id: int
     requirement: str
@@ -58,12 +93,33 @@ class SoftwareTeamWorkflow:
         self.initial_graph = self._build_initial_graph().compile()
         self.deployment_graph = self._build_deployment_graph().compile()
 
+    def _state_from_run(self, run) -> SoftwareTeamState:
+        latest_evaluation = next(reversed(self.repository.list_evaluations(run.id)), None)
+        bug_report = ""
+        if latest_evaluation and not latest_evaluation.passed:
+            bug_report = latest_evaluation.summary
+        return {
+            "run_id": run.id,
+            "requirement": run.requirement,
+            "provider": run.provider,
+            "model": run.model,
+            "artifacts": {file.path: file.content for file in self.repository.list_files(run.id)},
+            "messages": [message.content for message in self.repository.list_messages(run.id)],
+            "bug_report": bug_report,
+            "bugs_found": bool(latest_evaluation and not latest_evaluation.passed),
+            "evaluation_passed": bool(latest_evaluation and latest_evaluation.passed),
+            "revision_count": 0,
+            "control_loop": self._control_snapshot(
+                ControlLoopState(run_id=run.id, goal=run.requirement, phase=ControlPhase.SENSE)
+            ),
+        }
+
     def run_until_approval(self, run_id: int) -> SoftwareTeamState | None:
         run = self.repository.get_run(run_id)
         if not run:
             return None
 
-        self.repository.update_run(run_id, status="running", current_stage="backend", error=None)
+        self.repository.update_run(run_id, status="running", current_stage="planning", error=None, stop_requested=False)
         self.repository.set_many_agent_statuses(run_id, AGENTS, "idle")
         self.repository.add_log(
             run_id,
@@ -88,15 +144,48 @@ class SoftwareTeamWorkflow:
             ),
         }
         final_state = self.initial_graph.invoke(state)
-        refreshed = self.repository.get_run(run_id)
-        if refreshed and refreshed.status not in {"failed", "stopped"}:
-            self.repository.update_run(run_id, status="waiting_approval", current_stage="deployment_approval")
+        self._mark_waiting_for_approval_if_ready(run_id)
+        return final_state
+
+    def resume_run(self, run_id: int) -> SoftwareTeamState | None:
+        run = self.repository.get_run(run_id)
+        if not run:
+            return None
+        if run.status not in {"failed", "stopped", "interrupted"}:
             self.repository.add_log(
                 run_id,
                 "Human Manager",
-                "Approval required",
-                "Testing is complete. Review generated files, then approve deployment when ready.",
+                "Resume skipped",
+                f"Run is '{run.status}', so there is no paused or failed stage to resume.",
+                status="warning",
             )
+            return None
+
+        resume_stage = self._resolve_resume_stage(run)
+
+        if resume_stage == "deployment":
+            if not run.approved_for_deployment:
+                self.repository.add_log(
+                    run_id,
+                    "Deployment Agent",
+                    "Resume blocked",
+                    "Deployment resume requires human approval first.",
+                    status="warning",
+                )
+                return None
+            return self.run_deployment(run_id)
+
+        self.repository.update_run(run_id, status="running", current_stage=resume_stage, error=None, stop_requested=False)
+        self.repository.add_log(
+            run_id,
+            "Human Manager",
+            "Run resumed",
+            f"Resuming from stage '{resume_stage}'. Existing artifacts and memory are reused.",
+            status="success",
+        )
+        state = self._state_from_run(run)
+        final_state = self._run_initial_sequence_from_stage(state, resume_stage)
+        self._mark_waiting_for_approval_if_ready(run_id)
         return final_state
 
     def run_deployment(self, run_id: int) -> SoftwareTeamState | None:
@@ -145,6 +234,115 @@ class SoftwareTeamWorkflow:
                 "Docker and local deployment artifacts are ready in the generated run folder.",
             )
         return final_state
+
+    def _mark_waiting_for_approval_if_ready(self, run_id: int) -> None:
+        refreshed = self.repository.get_run(run_id)
+        if refreshed and refreshed.status not in {"failed", "stopped", "interrupted"}:
+            self.repository.update_run(run_id, status="waiting_approval", current_stage="deployment_approval")
+            self.repository.add_log(
+                run_id,
+                "Human Manager",
+                "Approval required",
+                "Testing is complete. Review generated files, then approve deployment when ready.",
+            )
+
+    def _resolve_resume_stage(self, run) -> str:
+        """Pick the best workflow boundary to continue from.
+
+        Older rows, manual stops, or process interruptions can leave
+        ``current_stage`` stale. Agent statuses give us a second signal so a
+        run that already reached Frontend/Testing does not restart at Planning.
+        """
+        raw_stage = run.current_stage or "planning"
+        saved_stage = STAGE_ALIASES.get(raw_stage, raw_stage)
+        statuses = self.repository.list_agent_statuses(run.id)
+
+        retry_statuses = {"failed", "interrupted", "thinking", "working"}
+        retry_candidates = [
+            STAGE_BY_AGENT[row.agent_name]
+            for row in statuses
+            if row.status in retry_statuses and row.agent_name in STAGE_BY_AGENT
+        ]
+        retry_candidates = [stage for stage in retry_candidates if stage != "deployment"]
+        if retry_candidates:
+            return max(retry_candidates, key=self._stage_resume_rank)
+
+        completed_stages = [
+            STAGE_BY_AGENT[row.agent_name]
+            for row in statuses
+            if row.status == "completed" and row.agent_name in STAGE_BY_AGENT
+        ]
+        completed_stages = [stage for stage in completed_stages if stage in INITIAL_STAGE_ORDER]
+        if completed_stages:
+            last_completed = max(completed_stages, key=self._stage_resume_rank)
+            next_index = min(self._stage_resume_rank(last_completed) + 1, len(INITIAL_STAGE_ORDER) - 1)
+            inferred_next = INITIAL_STAGE_ORDER[next_index]
+            if self._stage_resume_rank(inferred_next) > self._stage_resume_rank(saved_stage):
+                return inferred_next
+
+        valid_stages = {*INITIAL_STAGE_ORDER, "backend_revision", "frontend_revision", "deployment"}
+        if saved_stage in valid_stages:
+            return saved_stage
+        return "planning"
+
+    def _stage_resume_rank(self, stage: str) -> int:
+        normalized = STAGE_ALIASES.get(stage, stage)
+        if normalized == "backend_revision":
+            return INITIAL_STAGE_ORDER.index("backend")
+        if normalized == "frontend_revision":
+            return INITIAL_STAGE_ORDER.index("frontend")
+        if normalized in INITIAL_STAGE_ORDER:
+            return INITIAL_STAGE_ORDER.index(normalized)
+        if normalized == "deployment":
+            return len(INITIAL_STAGE_ORDER)
+        return -1
+
+    def _run_initial_sequence_from_stage(self, state: SoftwareTeamState, stage: str) -> SoftwareTeamState:
+        stage_order = [
+            ("planning", self._planner_node),
+            ("backend", self._backend_node),
+            ("frontend", self._frontend_node),
+            ("review", self._reviewer_node),
+            ("security", self._security_node),
+            ("testing", self._tester_node),
+            ("evaluation", self._evaluator_node),
+        ]
+        normalized_stage = STAGE_ALIASES.get(stage, stage)
+
+        if normalized_stage == "backend_revision":
+            state = self._backend_revision_node(state)
+            if state.get("failed") or state.get("stopped"):
+                return state
+            normalized_stage = "frontend_revision"
+        if normalized_stage == "frontend_revision":
+            state = self._frontend_revision_node(state)
+            if state.get("failed") or state.get("stopped"):
+                return state
+            normalized_stage = "review"
+
+        start_index = next(
+            (index for index, (name, _) in enumerate(stage_order) if name == normalized_stage),
+            0,
+        )
+        for _, node in stage_order[start_index:]:
+            state = node(state)
+            if state.get("failed") or state.get("stopped"):
+                return state
+
+        route = self._route_after_testing(state)
+        if route == "revise":
+            state = self._backend_revision_node(state)
+            if state.get("failed") or state.get("stopped"):
+                return state
+            state = self._frontend_revision_node(state)
+            if state.get("failed") or state.get("stopped"):
+                return state
+            for _, node in stage_order[3:]:
+                state = node(state)
+                if state.get("failed") or state.get("stopped"):
+                    return state
+            self._route_after_testing(state)
+        return state
 
     def _build_initial_graph(self) -> StateGraph:
         graph = StateGraph(SoftwareTeamState)

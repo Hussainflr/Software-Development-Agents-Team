@@ -92,7 +92,7 @@ More samples:
 Requirement -> Backend -> Frontend -> Testing -> Human Approval -> Deployment
 ```
 
-Mission Control validates your requirement before starting. If testing or evaluation fails, the workflow gets one revision pass. If evaluation still fails, deployment approval is blocked.
+Mission Control validates your requirement before starting. If testing or evaluation fails, the workflow gets one revision pass. If evaluation still fails, deployment approval is blocked. Stopped, failed, or interrupted runs can be resumed from their saved stage.
 
 The workflow now records Agentic OS control-loop phases:
 

@@ -219,15 +219,38 @@ def stop_run(run_id: int) -> ActionResponse:
     run = repository.get_run(run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
-    updated = repository.update_run(run_id, stop_requested=True, status="stopped", current_stage="stopped")
+    updated = repository.update_run(run_id, stop_requested=True, status="stopped")
     repository.add_log(
         run_id,
         "Human Manager",
         "Stop requested",
-        "The run will stop at the next workflow boundary.",
+        "The run will stop at the next workflow boundary. You can resume it from the current stage.",
         status="warning",
     )
     return ActionResponse(message="Stop requested.", run=RunResponse.model_validate(updated))
+
+
+@app.post("/api/runs/{run_id}/resume", response_model=ActionResponse)
+def resume_run(run_id: int) -> ActionResponse:
+    run = repository.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    if run.status not in {"failed", "stopped", "interrupted"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Run is '{run.status}', not failed, stopped, or interrupted.",
+        )
+
+    updated = repository.update_run(run_id, stop_requested=False)
+    repository.add_log(
+        run_id,
+        "Human Manager",
+        "Resume requested",
+        f"Resume requested from stage '{run.current_stage}'.",
+        status="success",
+    )
+    launch_background(workflow.resume_run, run_id)
+    return ActionResponse(message="Resume requested.", run=RunResponse.model_validate(updated))
 
 
 @app.post("/api/runs/{run_id}/restart", response_model=RunResponse, status_code=status.HTTP_201_CREATED)
