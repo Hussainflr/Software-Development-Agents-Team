@@ -99,6 +99,8 @@ def providers() -> ProvidersResponse:
         suggested_provider=suggested_provider,
         suggested_model=suggested_model,
         model_recommendations=model_recommendations(discovery),
+        max_parallel_runs=settings.max_parallel_runs,
+        active_run_count=repository.count_active_runs(),
         **cloud_provider_status(),
         **discovery,
     )
@@ -114,6 +116,15 @@ def validate_manager_requirement(payload: RequirementValidationRequest) -> Requi
     return RequirementValidationResponse(**validate_requirement(payload.requirement).model_dump())
 
 
+def enforce_parallel_run_limit() -> None:
+    active_count = repository.count_active_runs()
+    if active_count >= settings.max_parallel_runs:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{active_count} runs are already active. Finish, stop, or approve one before starting another.",
+        )
+
+
 @app.post("/api/runs", response_model=RunResponse, status_code=status.HTTP_201_CREATED)
 def create_run(payload: RunCreate) -> RunResponse:
     requirement_validation = validate_requirement(payload.requirement)
@@ -122,6 +133,7 @@ def create_run(payload: RunCreate) -> RunResponse:
             status_code=422,
             detail=requirement_validation.model_dump(),
         )
+    enforce_parallel_run_limit()
 
     try:
         provider = normalize_provider(payload.provider)
@@ -240,6 +252,7 @@ def resume_run(run_id: int) -> ActionResponse:
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Run is '{run.status}', not failed, stopped, or interrupted.",
         )
+    enforce_parallel_run_limit()
 
     updated = repository.update_run(run_id, stop_requested=False)
     repository.add_log(
@@ -258,6 +271,7 @@ def restart_run(run_id: int) -> RunResponse:
     run = repository.get_run(run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    enforce_parallel_run_limit()
     restarted = repository.create_run(run.requirement, run.provider, run.model)
     repository.add_log(
         restarted.id,

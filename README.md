@@ -61,6 +61,8 @@ Open:
 
 The local script uses a scoped reload watcher. This matters because generated projects contain Python files; broad project-root reload watching can restart FastAPI during a run and mark the run as interrupted.
 
+By default, Mission Control allows up to five active runs at the same time. Change `MAX_PARALLEL_RUNS` in `.env` if you want a different local limit.
+
 ## Manual Local Start
 
 Start the API:
@@ -229,7 +231,7 @@ The React dashboard includes:
 
 - manager requirement input
 - LLM provider/model selector
-- recent runs in a bounded list
+- recent runs in a bounded list with running-run indicators
 - workflow progress
 - agent status cards
 - live logs
@@ -238,6 +240,8 @@ The React dashboard includes:
 - evaluation scores
 - Memory and Context tab
 - stop, resume, restart, and approve deployment controls
+
+The dashboard allows five parallel active workflows by default. Active runs are pinned to the top of Recent Runs. If the active-run limit is reached, the prompt box stays usable for drafting, but launching another run is disabled until one active run finishes, stops, or moves out of the active set.
 
 On a fresh dashboard load, no previous run is auto-opened. Logs, files, memory, and context views stay clean until you start or select a run.
 

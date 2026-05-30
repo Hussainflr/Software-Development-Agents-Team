@@ -157,6 +157,8 @@ class ProvidersResponse(BaseModel):
     suggested_provider: str = DEFAULT_PROVIDER
     suggested_model: str = DEFAULT_MODEL
     model_recommendations: list[ModelRecommendationResponse] = Field(default_factory=list)
+    max_parallel_runs: int = 5
+    active_run_count: int = 0
     message: str = ""
 
 

@@ -30,6 +30,8 @@ AGENTS = [
     "Deployment Agent",
 ]
 
+ACTIVE_RUN_STATUSES = ("running", "waiting_approval", "deployment")
+
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -65,6 +67,11 @@ class Repository:
         with self.session_factory() as session:
             statement = select(Run).order_by(Run.created_at.desc()).limit(limit)
             return list(session.scalars(statement))
+
+    def count_active_runs(self) -> int:
+        with self.session_factory() as session:
+            statement = select(Run).where(Run.status.in_(ACTIVE_RUN_STATUSES))
+            return len(list(session.scalars(statement)))
 
     def interrupt_active_runs(self) -> int:
         """Mark runs left active by a previous API process as interrupted.

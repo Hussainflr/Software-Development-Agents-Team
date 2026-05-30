@@ -20,6 +20,7 @@ const EXAMPLE_PROMPTS = [
 ];
 
 const RUN_FLOW = ["Plan", "Build", "Review", "Test", "Evaluate", "Approve", "Deploy"];
+const ACTIVE_RUN_STATUSES = ["running", "waiting_approval", "deployment"];
 
 const STAGE_PROGRESS: Record<string, number> = {
   requirement: 5,
@@ -56,6 +57,8 @@ type ProvidersResponse = {
   detected_model: string | null;
   suggested_provider: string;
   suggested_model: string;
+  max_parallel_runs: number;
+  active_run_count: number;
   message: string;
 };
 
@@ -176,6 +179,66 @@ function logSummary(value: string) {
   }
 }
 
+function parseJsonObject(value?: string): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function asText(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  return JSON.stringify(value, null, 2);
+}
+
+function compactText(value?: string, max = 280) {
+  if (!value) return "";
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > max ? `${normalized.slice(0, max).trim()}...` : normalized;
+}
+
+function memoryLabel(item: MemoryItem) {
+  const raw = item.key ?? item.category ?? "memory";
+  const parts = raw.split(":");
+  if (parts[0] === "context") return `${parts[1] ?? "Agent"} context`;
+  if (parts[0] === "output") return `${parts[1] ?? "Agent"} output`;
+  if (raw === "latest_evaluation") return "Latest evaluation";
+  return raw.replaceAll("_", " ");
+}
+
+function memoryMeta(item: MemoryItem) {
+  const raw = item.key ?? item.category ?? "";
+  const parts = raw.split(":");
+  if (parts.length >= 3) return parts.slice(2).join(" -> ");
+  if (item.source_run_id) return `Run ${item.source_run_id}`;
+  return item.updated_at ? formatTime(item.updated_at) : item.created_at ? formatTime(item.created_at) : "";
+}
+
+function memoryBody(item: MemoryItem) {
+  const value = item.value ?? item.summary ?? "";
+  const parsed = parseJsonObject(value);
+  if (parsed?.summary) return asText(parsed.summary);
+  if (parsed) return JSON.stringify(parsed, null, 2);
+  return value;
+}
+
+function isActiveRun(run: Run) {
+  return ACTIVE_RUN_STATUSES.includes(run.status);
+}
+
+function runTone(run: Run) {
+  if (run.status === "completed") return "success";
+  if (["failed", "interrupted"].includes(run.status)) return "danger";
+  if (run.status === "stopped") return "neutral";
+  if (run.status === "waiting_approval") return "approval";
+  if (isActiveRun(run)) return "running";
+  return "neutral";
+}
+
 function statusTone(status: string) {
   if (["completed", "success", "online", "connected"].includes(status)) return "success";
   if (["failed", "error", "offline", "unavailable"].includes(status)) return "danger";
@@ -253,7 +316,7 @@ export function App() {
           if (!cancelled) {
             setDetail(data);
             setSelectedFile((current) => current || data.files[0]?.path || "");
-            setSelectedContext((current) => current ?? data.contexts[0]?.id ?? null);
+            setSelectedContext((current) => current ?? data.contexts.at(-1)?.id ?? null);
           }
         })
         .catch((error) => setNotice(error.message));
@@ -278,11 +341,30 @@ export function App() {
   );
   const progress = progressFor(detail, statuses);
   const latestEval = detail?.evaluations.at(-1);
+  const activeRunCount = runs.filter(isActiveRun).length;
+  const maxParallelRuns = providers?.max_parallel_runs ?? 5;
+  const creationLimitReached = activeRunCount >= maxParallelRuns;
+  const displayedRuns = useMemo(
+    () => [...runs].sort((a, b) => {
+      const activeDelta = Number(isActiveRun(b)) - Number(isActiveRun(a));
+      if (activeDelta !== 0) return activeDelta;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    }),
+    [runs],
+  );
   const selectedFileData = detail?.files.find((file) => file.path === selectedFile);
   const selectedContextData = detail?.contexts.find((context) => context.id === selectedContext);
+  const orderedContexts = useMemo(
+    () => [...(detail?.contexts ?? [])].sort((a, b) => b.id - a.id),
+    [detail],
+  );
 
   async function startRun(event: FormEvent) {
     event.preventDefault();
+    if (creationLimitReached) {
+      setNotice(`${activeRunCount} runs are already active. Finish, stop, or approve one before starting another.`);
+      return;
+    }
     setBusy(true);
     setNotice("");
     try {
@@ -361,20 +443,28 @@ export function App() {
         <section className="side-section recent-runs-section">
           <div className="side-section-head">
             <h3>Recent runs</h3>
-            <span>{runs.length}</span>
+            <span>{activeRunCount}/{maxParallelRuns}</span>
+          </div>
+          <div className={`active-runs-meter ${creationLimitReached ? "full" : ""}`}>
+            {creationLimitReached
+              ? "Parallel run limit reached"
+              : `${Math.max(maxParallelRuns - activeRunCount, 0)} run slot${maxParallelRuns - activeRunCount === 1 ? "" : "s"} available`}
           </div>
           <div className="run-list">
-            {runs.map((run) => (
+            {displayedRuns.map((run) => (
               <button
-                className={`run-item ${run.id === selectedRunId ? "active" : ""}`}
+                className={`run-item ${run.id === selectedRunId ? "active" : ""} ${runTone(run)}`}
                 key={run.id}
                 onClick={() => {
                   setTab("logs");
                   setSelectedRunId(run.id);
                 }}
               >
-                <span>Run {run.id}</span>
-                <small>{run.current_stage} · {formatTime(run.created_at)}</small>
+                <span>
+                  Run {run.id}
+                  {isActiveRun(run) ? <i>Running</i> : null}
+                </span>
+                <small>{run.status.replace("_", " ")} · {run.current_stage} · {formatTime(run.created_at)}</small>
               </button>
             ))}
           </div>
@@ -401,6 +491,13 @@ export function App() {
               <span>{detail ? "Manager input" : "Ready to build"}</span>
               <strong>{detail ? "New run" : "Describe the outcome"}</strong>
             </div>
+            {activeRunCount ? (
+              <div className={`parallel-note ${creationLimitReached ? "blocked" : ""}`}>
+                {creationLimitReached
+                  ? `${activeRunCount} runs are already active. You can draft here, but launch is disabled until one finishes, stops, or gets approved.`
+                  : `${activeRunCount} active run${activeRunCount === 1 ? "" : "s"}. You can start ${maxParallelRuns - activeRunCount} more parallel run${maxParallelRuns - activeRunCount === 1 ? "" : "s"}.`}
+              </div>
+            ) : null}
             <textarea
               value={requirement}
               onChange={(event) => setRequirement(event.target.value)}
@@ -414,8 +511,8 @@ export function App() {
                 </button>
               ))}
             </div>
-            <button className="primary" disabled={busy || !requirement.trim()}>
-              {busy ? "Starting..." : "Start Run"}
+            <button className="primary" disabled={busy || creationLimitReached || !requirement.trim()}>
+              {busy ? "Starting..." : creationLimitReached ? "Parallel Limit Reached" : "Start Run"}
             </button>
           </form>
 
@@ -502,26 +599,14 @@ export function App() {
               ) : null}
               {tab === "messages" ? <Messages messages={detail.messages} /> : null}
               {tab === "memory" ? (
-                <div className="split">
-                  <div>
-                    <h3>Short-term memory</h3>
-                    <MemoryList items={detail.short_term_memory} />
-                    <h3>Long-term memory</h3>
-                    <MemoryList items={detail.long_term_memory} />
-                  </div>
-                  <div>
-                    <h3>Context snapshots</h3>
-                    <div className="list">
-                      {detail.contexts.map((context) => (
-                        <button key={context.id} className={selectedContext === context.id ? "active" : ""} onClick={() => setSelectedContext(context.id)}>
-                          <span>{context.agent_name}</span>
-                          <small>{formatTime(context.timestamp)}</small>
-                        </button>
-                      ))}
-                    </div>
-                    <pre>{selectedContextData?.payload_json ?? "Context snapshots will appear here."}</pre>
-                  </div>
-                </div>
+                <MemoryContextTab
+                  contexts={orderedContexts}
+                  selectedContext={selectedContext}
+                  selectedContextData={selectedContextData}
+                  setSelectedContext={setSelectedContext}
+                  shortTermMemory={detail.short_term_memory}
+                  longTermMemory={detail.long_term_memory}
+                />
               ) : null}
               {tab === "evaluation" ? <Evaluations evaluations={detail.evaluations} /> : null}
             </section>
@@ -575,12 +660,109 @@ function Messages({ messages }: { messages: Message[] }) {
 
 function MemoryList({ items }: { items: MemoryItem[] }) {
   if (!items.length) return <div className="empty">No memory stored yet.</div>;
-  return <div className="cards compact">{items.map((item) => (
-    <article key={item.id}>
-      <strong>{item.key ?? item.category}</strong>
-      <p>{item.value ?? item.summary}</p>
+  return <div className="memory-cards">{items.map((item) => (
+    <article key={item.id} className="memory-card">
+      <div>
+        <strong>{memoryLabel(item)}</strong>
+        {memoryMeta(item) ? <small>{memoryMeta(item)}</small> : null}
+      </div>
+      <p>{memoryBody(item)}</p>
     </article>
   ))}</div>;
+}
+
+function MemoryContextTab({
+  contexts,
+  selectedContext,
+  selectedContextData,
+  setSelectedContext,
+  shortTermMemory,
+  longTermMemory,
+}: {
+  contexts: ContextSnapshot[];
+  selectedContext: number | null;
+  selectedContextData?: ContextSnapshot;
+  setSelectedContext: (id: number) => void;
+  shortTermMemory: MemoryItem[];
+  longTermMemory: MemoryItem[];
+}) {
+  return (
+    <div className="memory-layout">
+      <section className="memory-column">
+        <div className="memory-summary">
+          <Metric label="Short term" value={String(shortTermMemory.length)} />
+          <Metric label="Long term" value={String(longTermMemory.length)} />
+          <Metric label="Contexts" value={String(contexts.length)} />
+        </div>
+        <div className="memory-section-head">
+          <div>
+            <h3>Short-term memory</h3>
+            <p>Run-specific notes, outputs, and evaluation state.</p>
+          </div>
+        </div>
+        <MemoryList items={shortTermMemory} />
+        <div className="memory-section-head">
+          <div>
+            <h3>Long-term memory</h3>
+            <p>Reusable patterns remembered across runs.</p>
+          </div>
+        </div>
+        <MemoryList items={longTermMemory} />
+      </section>
+      <section className="context-column">
+        <div className="memory-section-head">
+          <div>
+            <h3>Context sent to agents</h3>
+            <p>Latest snapshots are shown first. Select one to see what the agent received.</p>
+          </div>
+        </div>
+        <div className="context-browser">
+          <div className="context-list">
+            {contexts.length ? contexts.map((context) => {
+              const payload = parseJsonObject(context.payload_json);
+              const task = asText(payload?.current_task) || "context";
+              return (
+                <button key={context.id} className={selectedContext === context.id ? "active" : ""} onClick={() => setSelectedContext(context.id)}>
+                  <span>{context.agent_name}</span>
+                  <small>{task} - {formatTime(context.timestamp)}</small>
+                </button>
+              );
+            }) : <div className="empty">No context snapshots yet.</div>}
+          </div>
+          <ContextSnapshotView context={selectedContextData} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ContextSnapshotView({ context }: { context?: ContextSnapshot }) {
+  if (!context) return <div className="empty">Select a context snapshot to inspect it.</div>;
+  const payload = parseJsonObject(context.payload_json);
+  if (!payload) return <pre>{context.payload_json}</pre>;
+  const fields: Array<[string, unknown]> = [
+    ["Agent", context.agent_name],
+    ["Current task", payload.current_task],
+    ["Role", payload.agent_role],
+    ["Constraints", payload.constraints],
+    ["Errors or feedback", payload.errors_or_feedback],
+    ["Relevant outputs", payload.relevant_outputs],
+    ["User requirement", payload.user_requirement],
+  ];
+  return (
+    <div className="context-detail">
+      {fields.map(([label, value]) => {
+        const text = asText(value);
+        if (!text) return null;
+        return (
+          <article key={label}>
+            <span>{label}</span>
+            <p>{text}</p>
+          </article>
+        );
+      })}
+    </div>
+  );
 }
 
 function Evaluations({ evaluations }: { evaluations: Evaluation[] }) {
