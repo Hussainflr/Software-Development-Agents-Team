@@ -119,6 +119,28 @@ class EvaluationResponse(BaseModel):
     summary: str
 
 
+class RunChatMessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    role: str
+    content: str
+    created_at: datetime
+
+
+class RunChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+
+
+class RunChangeRequest(BaseModel):
+    message: str = Field(min_length=5, max_length=4000)
+
+
+class RunChatResponse(BaseModel):
+    user_message: RunChatMessageResponse
+    assistant_message: RunChatMessageResponse
+
+
 class RunDetailResponse(RunResponse):
     revision_count: int = 0
     max_revision_passes: int = 2

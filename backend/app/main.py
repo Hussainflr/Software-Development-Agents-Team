@@ -16,10 +16,15 @@ from backend.app.schemas import (
     ProvidersResponse,
     RequirementValidationRequest,
     RequirementValidationResponse,
+    RunChangeRequest,
+    RunChatMessageResponse,
+    RunChatRequest,
+    RunChatResponse,
     RunCreate,
     RunDetailResponse,
     RunResponse,
 )
+from chat.run_chat_service import RunChatService
 from database.repository import Repository
 from database.session import init_db
 from guardrails import validate_requirement
@@ -41,6 +46,7 @@ settings = get_settings()
 repository = Repository()
 workflow = SoftwareTeamWorkflow(repository=repository)
 agentic_os = AgenticOSRuntime()
+run_chat_service = RunChatService(repository=repository)
 
 
 @asynccontextmanager
@@ -197,6 +203,61 @@ def get_outputs(run_id: int) -> list[GeneratedFileResponse]:
     if not repository.get_run(run_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return [GeneratedFileResponse.model_validate(row) for row in repository.list_files(run_id)]
+
+
+@app.get("/api/runs/{run_id}/chat", response_model=list[RunChatMessageResponse])
+def get_run_chat(run_id: int) -> list[RunChatMessageResponse]:
+    if not repository.get_run(run_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return [RunChatMessageResponse.model_validate(row) for row in repository.list_chat_messages(run_id)]
+
+
+@app.post("/api/runs/{run_id}/chat", response_model=RunChatResponse)
+def post_run_chat(run_id: int, payload: RunChatRequest) -> RunChatResponse:
+    if not repository.get_run(run_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    try:
+        user_row, assistant_row = run_chat_service.answer(run_id, payload.message)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return RunChatResponse(
+        user_message=RunChatMessageResponse.model_validate(user_row),
+        assistant_message=RunChatMessageResponse.model_validate(assistant_row),
+    )
+
+
+@app.post("/api/runs/{run_id}/change-request", response_model=ActionResponse, status_code=status.HTTP_201_CREATED)
+def create_change_request_run(run_id: int, payload: RunChangeRequest) -> ActionResponse:
+    source_run = repository.get_run(run_id)
+    if not source_run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    enforce_parallel_run_limit()
+
+    requirement = (
+        f"Update the generated project from run {run_id}.\n\n"
+        f"Original requirement:\n{source_run.requirement}\n\n"
+        f"Requested change:\n{payload.message.strip()}\n\n"
+        "Preserve existing working functionality unless the requested change explicitly replaces it. "
+        "Reuse and modify the existing generated files that were seeded into this run."
+    )
+    requirement_validation = validate_requirement(requirement)
+    if not requirement_validation.allowed:
+        raise HTTPException(status_code=422, detail=requirement_validation.model_dump())
+
+    run = repository.create_followup_run(
+        source_run_id=run_id,
+        requirement=requirement,
+        provider=source_run.provider,
+        model=source_run.model,
+    )
+    repository.add_chat_message(run_id, "user", payload.message.strip())
+    repository.add_chat_message(
+        run_id,
+        "assistant",
+        f"Started update run {run.id} from this request. I seeded it with the generated files from run {run_id}.",
+    )
+    launch_background(workflow.run_until_approval, run.id)
+    return ActionResponse(message="Change request run started.", run=RunResponse.model_validate(run))
 
 
 @app.post("/api/runs/{run_id}/approve-deployment", response_model=ActionResponse)

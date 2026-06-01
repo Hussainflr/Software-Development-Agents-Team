@@ -136,6 +136,13 @@ type MemoryItem = {
   source_run_id?: number | null;
 };
 
+type ChatMessage = {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+};
+
 type RunDetail = Run & {
   revision_count: number;
   max_revision_passes: number;
@@ -285,6 +292,9 @@ export function App() {
   const [tab, setTab] = useState("logs");
   const [selectedFile, setSelectedFile] = useState("");
   const [selectedContext, setSelectedContext] = useState<number | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -311,6 +321,8 @@ export function App() {
     setTab("logs");
     setSelectedFile("");
     setSelectedContext(null);
+    setChatMessages([]);
+    setChatInput("");
     let cancelled = false;
     const load = () => {
       api<RunDetail>(`/api/runs/${selectedRunId}`)
@@ -330,6 +342,19 @@ export function App() {
       window.clearInterval(timer);
     };
   }, [selectedRunId]);
+
+  useEffect(() => {
+    if (!selectedRunId || tab !== "chat") return;
+    let cancelled = false;
+    api<ChatMessage[]>(`/api/runs/${selectedRunId}/chat`)
+      .then((data) => {
+        if (!cancelled) setChatMessages(data);
+      })
+      .catch((error) => setNotice(error.message));
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRunId, tab]);
 
   const selectedProvider = providers?.options.find((item) => item.id === provider);
   const modelOptions = useMemo(() => {
@@ -403,6 +428,47 @@ export function App() {
       setNotice(error instanceof Error ? error.message : "Action failed.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function sendChatMessage(event: FormEvent) {
+    event.preventDefault();
+    if (!detail || !chatInput.trim()) return;
+    setChatBusy(true);
+    setNotice("");
+    try {
+      const response = await api<{ user_message: ChatMessage; assistant_message: ChatMessage }>(`/api/runs/${detail.id}/chat`, {
+        method: "POST",
+        body: JSON.stringify({ message: chatInput }),
+      });
+      setChatMessages((messages) => [...messages, response.user_message, response.assistant_message]);
+      setChatInput("");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Chat failed.");
+    } finally {
+      setChatBusy(false);
+    }
+  }
+
+  async function startChangeRequest() {
+    if (!detail || !chatInput.trim()) return;
+    setChatBusy(true);
+    setNotice("");
+    try {
+      const response = await api<{ run?: Run }>(`/api/runs/${detail.id}/change-request`, {
+        method: "POST",
+        body: JSON.stringify({ message: chatInput }),
+      });
+      if (response.run?.id) {
+        setChatInput("");
+        setTab("logs");
+        setSelectedRunId(response.run.id);
+        refreshRuns();
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not start update run.");
+    } finally {
+      setChatBusy(false);
     }
   }
 
@@ -577,7 +643,7 @@ export function App() {
 
             <section className="panel workspace" key={tab}>
               <nav className="tabs">
-                {["logs", "files", "messages", "memory", "evaluation"].map((item) => (
+                {["logs", "files", "messages", "memory", "evaluation", "chat"].map((item) => (
                   <button className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>
                     {item}
                   </button>
@@ -610,6 +676,16 @@ export function App() {
                 />
               ) : null}
               {tab === "evaluation" ? <Evaluations evaluations={detail.evaluations} /> : null}
+              {tab === "chat" ? (
+                <RunChat
+                  messages={chatMessages}
+                  value={chatInput}
+                  busy={chatBusy}
+                  onChange={setChatInput}
+                  onSubmit={sendChatMessage}
+                  onStartChangeRequest={startChangeRequest}
+                />
+              ) : null}
             </section>
           </>
         ) : null}
@@ -780,4 +856,55 @@ function Evaluations({ evaluations }: { evaluations: Evaluation[] }) {
       <p>{evaluation.summary}</p>
     </article>
   ))}</div>;
+}
+
+function RunChat({
+  messages,
+  value,
+  busy,
+  onChange,
+  onSubmit,
+  onStartChangeRequest,
+}: {
+  messages: ChatMessage[];
+  value: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+  onSubmit: (event: FormEvent) => void;
+  onStartChangeRequest: () => void;
+}) {
+  return (
+    <div className="run-chat">
+      <div className="chat-thread">
+        {messages.length ? messages.map((message) => (
+          <article key={message.id} className={`chat-message ${message.role}`}>
+            <div>
+              <strong>{message.role === "user" ? "You" : "Mission Control"}</strong>
+              <small>{formatTime(message.created_at)}</small>
+            </div>
+            <p>{message.content}</p>
+          </article>
+        )) : (
+          <div className="empty">
+            Ask about this run: current status, revision reason, generated files, evaluation results, or what changed.
+          </div>
+        )}
+      </div>
+      <form className="chat-compose" onSubmit={onSubmit}>
+        <textarea
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Ask for a status update, why it went to revision, or what files were generated."
+        />
+        <div className="chat-actions">
+          <button className="primary" disabled={busy || !value.trim()}>
+            {busy ? "Thinking..." : "Ask"}
+          </button>
+          <button type="button" className="secondary-action" disabled={busy || !value.trim()} onClick={onStartChangeRequest}>
+            Start Update Run
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 }

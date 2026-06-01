@@ -34,6 +34,7 @@ class Run(Base):
     contexts: Mapped[list["ContextSnapshot"]] = relationship(back_populates="run", cascade="all, delete-orphan")
     short_term_memory: Mapped[list["ShortTermMemoryItem"]] = relationship(back_populates="run", cascade="all, delete-orphan")
     evaluations: Mapped[list["EvaluationResult"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    chat_messages: Mapped[list["RunChatMessage"]] = relationship(back_populates="run", cascade="all, delete-orphan")
 
 
 class AgentStatus(Base):
@@ -135,3 +136,15 @@ class EvaluationResult(Base):
     summary: Mapped[str] = mapped_column(Text)
 
     run: Mapped[Run] = relationship(back_populates="evaluations")
+
+
+class RunChatMessage(Base):
+    __tablename__ = "run_chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), index=True)
+    role: Mapped[str] = mapped_column(String(40), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+    run: Mapped[Run] = relationship(back_populates="chat_messages")

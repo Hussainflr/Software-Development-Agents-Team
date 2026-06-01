@@ -167,6 +167,7 @@ Mission Control shows:
 - Agent messages
 - Memory and context snapshots
 - Evaluation scores
+- Run-scoped read-only chat
 - Stop, resume, restart, and approve deployment controls
 
 On a fresh dashboard load, no previous run is auto-opened. You can select a run from Recent Runs when you want to inspect history.
@@ -184,6 +185,8 @@ GET  /api/runs/{run_id}
 GET  /api/runs/{run_id}/logs
 GET  /api/runs/{run_id}/status
 GET  /api/runs/{run_id}/outputs
+GET  /api/runs/{run_id}/chat
+POST /api/runs/{run_id}/chat
 POST /api/runs/{run_id}/approve-deployment
 POST /api/runs/{run_id}/stop
 POST /api/runs/{run_id}/resume

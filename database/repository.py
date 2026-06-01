@@ -14,6 +14,7 @@ from database.models import (
     GeneratedFile,
     LongTermMemoryItem,
     Run,
+    RunChatMessage,
     ShortTermMemoryItem,
 )
 from database.session import SessionLocal
@@ -58,6 +59,24 @@ class Repository:
                 session.add(AgentStatus(run_id=run.id, agent_name=agent_name, status="idle"))
             session.commit()
             return run
+
+    def create_followup_run(self, source_run_id: int, requirement: str, provider: str, model: str) -> Run:
+        run = self.create_run(requirement=requirement, provider=provider, model=model)
+        source_files = self.list_files(source_run_id)
+        if source_files:
+            self.upsert_generated_files(
+                run.id,
+                f"Seeded from run {source_run_id}",
+                {file.path: file.content for file in source_files},
+            )
+        self.add_log(
+            run.id,
+            "Human Manager",
+            "Change request started",
+            f"Seeded from run {source_run_id} with {len(source_files)} existing generated files.",
+            status="success",
+        )
+        return run
 
     def get_run(self, run_id: int) -> Run | None:
         with self.session_factory() as session:
@@ -344,6 +363,23 @@ class Repository:
                 .order_by(EvaluationResult.timestamp.asc())
             )
             return list(session.scalars(statement))
+
+    def add_chat_message(self, run_id: int, role: str, content: str) -> RunChatMessage:
+        with self.session_factory() as session:
+            row = RunChatMessage(run_id=run_id, role=role, content=content)
+            session.add(row)
+            session.commit()
+            return row
+
+    def list_chat_messages(self, run_id: int, limit: int = 50) -> list[RunChatMessage]:
+        with self.session_factory() as session:
+            statement = (
+                select(RunChatMessage)
+                .where(RunChatMessage.run_id == run_id)
+                .order_by(RunChatMessage.created_at.desc())
+                .limit(limit)
+            )
+            return list(reversed(list(session.scalars(statement))))
 
     def stop_requested(self, run_id: int) -> bool:
         run = self.get_run(run_id)

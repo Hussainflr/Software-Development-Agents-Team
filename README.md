@@ -242,6 +242,7 @@ The React dashboard includes:
 - agent messages
 - evaluation scores
 - Memory and Context tab
+- run-scoped Chat tab for read-only status questions
 - stop, resume, restart, and approve deployment controls
 
 The dashboard allows five parallel active workflows by default. Active runs are pinned to the top of Recent Runs. If the active-run limit is reached, the prompt box stays usable for drafting, but launching another run is disabled until one active run finishes, stops, or moves out of the active set.
@@ -263,6 +264,8 @@ GET  /api/runs/{run_id}
 GET  /api/runs/{run_id}/logs
 GET  /api/runs/{run_id}/status
 GET  /api/runs/{run_id}/outputs
+GET  /api/runs/{run_id}/chat
+POST /api/runs/{run_id}/chat
 POST /api/runs/{run_id}/approve-deployment
 POST /api/runs/{run_id}/stop
 POST /api/runs/{run_id}/resume
@@ -295,7 +298,19 @@ skills/              Skills registry and reusable capability docs
 tests/               Unit tests
 tools/               Artifact sanitizer, file writer, tool registry
 workflows/           LangGraph orchestration
+chat/                Read-only run chat service
 ```
+
+## Run Chat
+
+Each run has a Chat tab where you can ask questions like:
+
+- What is happening now?
+- Why did this go to revision?
+- What files were generated?
+- What failed in evaluation?
+
+The first version is intentionally read-only. It answers from a compact run digest made of status, stage, revision count, recent logs, generated file names, agent summaries, and latest evaluation. It cannot stop, resume, approve, or mutate a run.
 
 ## Useful Commands
 
