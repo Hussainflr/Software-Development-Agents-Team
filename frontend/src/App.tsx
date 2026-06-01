@@ -137,6 +137,8 @@ type MemoryItem = {
 };
 
 type RunDetail = Run & {
+  revision_count: number;
+  max_revision_passes: number;
   statuses: AgentStatus[];
   logs: Log[];
   files: GeneratedFile[];
@@ -340,7 +342,6 @@ export function App() {
     [detail],
   );
   const progress = progressFor(detail, statuses);
-  const latestEval = detail?.evaluations.at(-1);
   const activeRunCount = runs.filter(isActiveRun).length;
   const maxParallelRuns = providers?.max_parallel_runs ?? 5;
   const creationLimitReached = activeRunCount >= maxParallelRuns;
@@ -534,7 +535,7 @@ export function App() {
                   <Metric label="Status" value={detail.status} />
                   <Metric label="Stage" value={detail.current_stage} />
                   <Metric label="Agents done" value={`${Object.values(statuses).filter((item) => item === "completed").length}/${AGENTS.length}`} />
-                  <Metric label="Quality" value={latestEval ? (latestEval.passed ? "pass" : "review") : "pending"} />
+                  <Metric label="Revisions" value={`${detail.revision_count}/${detail.max_revision_passes}`} />
                 </div>
                 <div className="actions">
                   <button disabled={busy || detail.status !== "waiting_approval"} onClick={() => runAction("approve-deployment")}>Approve</button>

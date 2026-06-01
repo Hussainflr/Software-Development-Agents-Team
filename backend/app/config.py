@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./agent_team.db"
     generated_projects_dir: Path = Field(default=Path("generated_projects"))
     max_parallel_runs: int = 5
+    max_revision_passes: int = 2
 
     llm_provider: str = DEFAULT_PROVIDER
     llm_model: str = DEFAULT_MODEL

@@ -260,6 +260,30 @@ class Repository:
             )
             return list(session.scalars(statement))
 
+    def revision_count(self, run_id: int) -> int:
+        """Return the latest known refinement pass count for a run."""
+        rows = self.list_short_term_memory(run_id)
+        for row in reversed(rows):
+            if row.key == "revision_count":
+                try:
+                    return max(0, int(row.value))
+                except ValueError:
+                    return 0
+
+        # Backward-compatible fallback for runs created before revision_count
+        # was persisted. Backend revision snapshots are created once per pass.
+        count = 0
+        for snapshot in self.list_context_snapshots(run_id):
+            if snapshot.agent_name != "Backend Agent":
+                continue
+            try:
+                payload = json.loads(snapshot.payload_json)
+            except json.JSONDecodeError:
+                continue
+            if payload.get("current_task") == "backend_revision":
+                count += 1
+        return count
+
     def add_long_term_memory(
         self,
         category: str,

@@ -72,6 +72,8 @@ def run_detail(run_id: int) -> RunDetailResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return RunDetailResponse(
         **RunResponse.model_validate(run).model_dump(),
+        revision_count=repository.revision_count(run_id),
+        max_revision_passes=settings.max_revision_passes,
         statuses=repository.list_agent_statuses(run_id),
         logs=repository.list_logs(run_id),
         files=repository.list_files(run_id),

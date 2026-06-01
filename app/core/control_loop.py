@@ -24,7 +24,7 @@ class ControlPhase(str, Enum):
 class ControlLoopPolicy:
     """Runtime limits applied to every autonomous workflow."""
 
-    max_refinements: int = 1
+    max_refinements: int = 2
     max_retries_per_step: int = 2
     step_timeout_seconds: int = 180
     workflow_timeout_seconds: int = 1800

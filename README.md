@@ -63,6 +63,8 @@ The local script uses a scoped reload watcher. This matters because generated pr
 
 By default, Mission Control allows up to five active runs at the same time. Change `MAX_PARALLEL_RUNS` in `.env` if you want a different local limit.
 
+The workflow also allows up to two revision passes after testing/evaluation feedback. Change `MAX_REVISION_PASSES` in `.env` if you want to tune that loop.
+
 ## Manual Local Start
 
 Start the API:
@@ -157,13 +159,13 @@ Requirement
   -> Deployment
 ```
 
-If testing or evaluation finds issues, the workflow gets one refinement pass:
+If testing or evaluation finds issues, the workflow gets up to two refinement passes:
 
 ```text
 Tester/Evaluator -> Backend revision -> Frontend revision -> Retest
 ```
 
-If the final evaluation fails, deployment approval is blocked. If a run is stopped, fails, or gets interrupted by a server restart, the Resume action continues from the best saved workflow stage instead of starting from the beginning.
+If the final evaluation fails after the available revision passes, deployment approval is blocked. If a run is stopped, fails, or gets interrupted by a server restart, the Resume action continues from the best saved workflow stage instead of starting from the beginning.
 
 Generated files are written to:
 
@@ -234,6 +236,7 @@ The React dashboard includes:
 - recent runs in a bounded list with running-run indicators
 - workflow progress
 - agent status cards
+- revision count, for example `1/2`
 - live logs
 - generated files
 - agent messages

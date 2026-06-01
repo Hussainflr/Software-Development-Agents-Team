@@ -56,7 +56,7 @@ Run behavior:
 6. Security Agent checks secrets, unsafe actions, and permission risks.
 7. Tester Agent writes/reviews tests and runs generated pytest files when present.
 8. Evaluation scores correctness, completeness, code quality, endpoint consistency, and requirement alignment.
-9. If issues are found, the workflow gets one revision pass.
+9. If issues are found, the workflow gets up to two revision passes.
 10. If evaluation still fails, deployment approval is blocked.
 11. If evaluation passes, you can approve deployment.
 12. Generated files appear in `generated_projects/run_<id>/`.
@@ -247,7 +247,7 @@ Agents communicate through LangGraph state and persisted records:
 - Generated tests are executed in an isolated temporary directory when possible.
 - Evaluator Agent writes quality-gate notes.
 - Evaluation records pass/fail scores.
-- If needed, the workflow sends feedback into one revision pass.
+- If needed, the workflow sends feedback into up to two revision passes.
 - Deployment Agent runs only after evaluation passes and the human manager approves.
 
 The Agentic OS control-loop snapshot also tracks phase, current agent, retry/refinement counters, and metadata so future dashboard views can show graph state and repair loops directly.

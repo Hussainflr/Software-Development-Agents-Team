@@ -88,7 +88,7 @@ class SoftwareTeamWorkflow:
         self.long_term_memory = LongTermMemory(repository=self.repository)
         self.evaluator = EvaluationScorer()
         self.generated_test_runner = GeneratedTestRunner()
-        self.control_policy = ControlLoopPolicy(max_refinements=1)
+        self.control_policy = ControlLoopPolicy(max_refinements=self.settings.max_revision_passes)
         self.trace_recorder = TraceRecorder(repository=self.repository)
         self.initial_graph = self._build_initial_graph().compile()
         self.deployment_graph = self._build_deployment_graph().compile()
@@ -108,7 +108,7 @@ class SoftwareTeamWorkflow:
             "bug_report": bug_report,
             "bugs_found": bool(latest_evaluation and not latest_evaluation.passed),
             "evaluation_passed": bool(latest_evaluation and latest_evaluation.passed),
-            "revision_count": 0,
+            "revision_count": self.repository.revision_count(run.id),
             "control_loop": self._control_snapshot(
                 ControlLoopState(run_id=run.id, goal=run.requirement, phase=ControlPhase.SENSE)
             ),
@@ -329,8 +329,7 @@ class SoftwareTeamWorkflow:
             if state.get("failed") or state.get("stopped"):
                 return state
 
-        route = self._route_after_testing(state)
-        if route == "revise":
+        while self._route_after_testing(state) == "revise":
             state = self._backend_revision_node(state)
             if state.get("failed") or state.get("stopped"):
                 return state
@@ -341,7 +340,6 @@ class SoftwareTeamWorkflow:
                 state = node(state)
                 if state.get("failed") or state.get("stopped"):
                     return state
-            self._route_after_testing(state)
         return state
 
     def _build_initial_graph(self) -> StateGraph:
@@ -409,6 +407,7 @@ class SoftwareTeamWorkflow:
     def _backend_revision_node(self, state: SoftwareTeamState) -> SoftwareTeamState:
         next_state = dict(state)
         next_state["revision_count"] = int(state.get("revision_count", 0)) + 1
+        self.short_term_memory.remember(int(state["run_id"]), "revision_count", str(next_state["revision_count"]))
         return self._run_agent(next_state, BackendAgent(), "backend_revision", revision=True)
 
     def _frontend_revision_node(self, state: SoftwareTeamState) -> SoftwareTeamState:
@@ -553,23 +552,31 @@ class SoftwareTeamWorkflow:
         if state.get("failed") or state.get("stopped"):
             return "end"
         needs_revision = state.get("bugs_found") or not state.get("evaluation_passed", False)
-        if needs_revision and int(state.get("revision_count", 0)) < 1:
+        revision_count = int(state.get("revision_count", 0))
+        max_revisions = self.control_policy.max_refinements
+        if needs_revision and revision_count < max_revisions:
             run_id = int(state["run_id"])
             control_state = self._control_from_state(state)
+            next_revision = revision_count + 1
             control_state.mark_refinement()
-            self._record_trace(control_state, "control.refine", "Evaluation requested one refinement pass.", "warning")
+            self._record_trace(
+                control_state,
+                "control.refine",
+                f"Evaluation requested revision pass {next_revision}/{max_revisions}.",
+                "warning",
+            )
             self.repository.add_log(
                 run_id,
                 "Tester Agent",
-                "Feedback loop",
-                "Testing or evaluation found issues. Sending feedback back to Backend and Frontend agents for one revision pass.",
+                f"Feedback loop {next_revision}/{max_revisions}",
+                "Testing or evaluation found issues. Sending feedback back to Backend and Frontend agents for another revision pass.",
                 status="warning",
             )
             state["control_loop"] = self._control_snapshot(control_state)
             return "revise"
         if needs_revision:
             run_id = int(state["run_id"])
-            message = "Evaluation failed after the available revision pass. Deployment approval is blocked."
+            message = f"Evaluation failed after {max_revisions} revision passes. Deployment approval is blocked."
             self.repository.update_run(run_id, status="failed", current_stage="testing", error=message)
             self.repository.add_log(
                 run_id,

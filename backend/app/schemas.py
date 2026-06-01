@@ -120,6 +120,8 @@ class EvaluationResponse(BaseModel):
 
 
 class RunDetailResponse(RunResponse):
+    revision_count: int = 0
+    max_revision_passes: int = 2
     statuses: list[AgentStatusResponse]
     logs: list[AgentLogResponse]
     files: list[GeneratedFileResponse]
